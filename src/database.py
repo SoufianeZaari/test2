@@ -155,6 +155,7 @@ class Database:
         ''')
         
         # Table 10 : Rattrapages (Makeup sessions)
+        # Note: UNIQUE constraint on (salle_id, date, heure_debut) prevents race conditions
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS rattrapages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,7 +172,8 @@ class Database:
                 FOREIGN KEY (enseignant_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
                 FOREIGN KEY (groupe_id) REFERENCES groupes(id) ON DELETE CASCADE,
                 FOREIGN KEY (salle_id) REFERENCES salles(id) ON DELETE CASCADE,
-                FOREIGN KEY (seance_originale_id) REFERENCES seances(id) ON DELETE SET NULL
+                FOREIGN KEY (seance_originale_id) REFERENCES seances(id) ON DELETE SET NULL,
+                UNIQUE (salle_id, date, heure_debut, statut) 
             )
         ''')
         
@@ -1009,6 +1011,12 @@ class Database:
         cursor = conn.cursor()
         
         try:
+            # Valider que le destinataire existe
+            cursor.execute('SELECT id FROM utilisateurs WHERE id = ?', (destinataire_id,))
+            if not cursor.fetchone():
+                print(f"⚠️ Destinataire {destinataire_id} inexistant - notification ignorée")
+                return None
+            
             cursor.execute('''
                 INSERT INTO notifications (destinataire_id, type_notification, titre, message, seance_id)
                 VALUES (?, ?, ?, ?, ?)
@@ -1084,6 +1092,7 @@ class Database:
         
         etudiants = cursor.fetchall()
         nb_envois = 0
+        nb_erreurs = 0
         
         for etudiant in etudiants:
             try:
@@ -1092,8 +1101,13 @@ class Database:
                     VALUES (?, ?, ?, ?, ?)
                 ''', (etudiant[0], type_notification, titre, message, seance_id))
                 nb_envois += 1
-            except Exception:
-                pass
+            except Exception as e:
+                nb_erreurs += 1
+                # Log error but continue sending to other students
+                print(f"⚠️ Erreur notification étudiant {etudiant[0]}: {e}")
+        
+        if nb_erreurs > 0:
+            print(f"ℹ️ Notifications groupe: {nb_envois} envoyées, {nb_erreurs} erreurs")
         
         conn.commit()
         conn.close()
@@ -1108,6 +1122,7 @@ class Database:
         cursor.execute("SELECT id FROM utilisateurs WHERE type_user = 'admin'")
         admins = cursor.fetchall()
         nb_envois = 0
+        nb_erreurs = 0
         
         for admin in admins:
             try:
@@ -1116,8 +1131,12 @@ class Database:
                     VALUES (?, ?, ?, ?, ?)
                 ''', (admin[0], type_notification, titre, message, seance_id))
                 nb_envois += 1
-            except Exception:
-                pass
+            except Exception as e:
+                nb_erreurs += 1
+                print(f"⚠️ Erreur notification admin {admin[0]}: {e}")
+        
+        if nb_erreurs > 0:
+            print(f"ℹ️ Notifications admins: {nb_envois} envoyées, {nb_erreurs} erreurs")
         
         conn.commit()
         conn.close()

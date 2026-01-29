@@ -17,7 +17,7 @@ class AudioService:
     """
     
     # Répertoire de sortie pour les fichiers audio
-    AUDIO_OUTPUT_DIR = "exports/audio"
+    AUDIO_OUTPUT_DIR = os.path.join("exports", "audio")
     
     # Langues supportées
     LANG_FR = "fr"
@@ -197,7 +197,11 @@ class AudioService:
             except Exception as e:
                 return False, f"Erreur de lecture: {str(e)}"
         else:
-            return False, "Moteur TTS non disponible. Installez pyttsx3 avec: pip install pyttsx3"
+            return False, (
+                "Moteur TTS non disponible. Pour activer la lecture vocale, installez l'un des modules suivants:\n"
+                "  • pip install pyttsx3  (lecture directe, hors-ligne)\n"
+                "  • pip install gTTS     (export fichier audio, nécessite internet)"
+            )
     
     def lire_emploi_du_temps_etudiant(self, etudiant_id: int, date: str = None) -> Tuple[bool, str]:
         """
