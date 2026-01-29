@@ -38,7 +38,10 @@ class ScheduleGenerator:
             existing_reservations: List of existing reservations
         """
         self.db = db
-        self.constraint_validator = ConstraintValidator(db)
+        self.constraint_validator = ConstraintValidator(
+            existing_seances or [],
+            existing_reservations or []
+        )
         
         # Combine seances and approved reservations
         all_sessions = (existing_seances or [])

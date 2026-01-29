@@ -447,6 +447,8 @@ class AdminWindow(QWidget):
         # usually Generation is a primary action. But "Supprimer les background colors" applies generally.
         self.btn_generate.setStyleSheet(SOBER_BUTTON_STYLE)
         self.btn_generate.setFixedHeight(50)
+        # Connect button to generation method
+        self.btn_generate.clicked.connect(self.run_generate_timetable)
         
         gen_layout.addWidget(self.btn_generate)
         layout.addWidget(gen_container)
@@ -487,6 +489,198 @@ class AdminWindow(QWidget):
             self.refresh_dashboard()
         else:
             QMessageBox.critical(self, "Erreur", f"Échec de l'import {type_import}. Vérifiez le format.")
+
+    def run_generate_timetable(self):
+        """
+        Génère l'emploi du temps complet pour tous les groupes.
+        Chaque groupe obtient ses cours, TD et TP assignés aux enseignants.
+        """
+        from src.logic.schedule_generator import ScheduleGenerator
+        from datetime import datetime, timedelta
+        from PyQt6.QtWidgets import QProgressDialog
+        
+        # Show progress dialog
+        progress = QProgressDialog(
+            "Génération de l'emploi du temps en cours...", 
+            "Annuler", 0, 100, self
+        )
+        progress.setWindowTitle("Génération")
+        progress.setMinimumWidth(400)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+        
+        try:
+            # Get all data from database
+            groupes = self.db.get_tous_groupes()
+            enseignants = self.db.get_tous_utilisateurs('enseignant')
+            salles = self.db.get_toutes_salles()
+            
+            if not groupes:
+                QMessageBox.warning(self, "Attention", "Aucun groupe trouvé. Importez d'abord les données.")
+                progress.close()
+                return
+            
+            if not enseignants:
+                QMessageBox.warning(self, "Attention", "Aucun enseignant trouvé. Importez d'abord les données.")
+                progress.close()
+                return
+            
+            if not salles:
+                QMessageBox.warning(self, "Attention", "Aucune salle trouvée. Importez d'abord les données.")
+                progress.close()
+                return
+            
+            # Calculate start week (next Monday)
+            today = datetime.now()
+            days_ahead = (7 - today.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            next_monday = today + timedelta(days=days_ahead)
+            semaine_debut = next_monday.strftime("%Y-%m-%d")
+            
+            # Get existing sessions to avoid conflicts
+            existing_seances = self.db.get_toutes_seances()
+            existing_seances_dict = [
+                {
+                    'id': s[0], 'titre': s[1], 'type_seance': s[2],
+                    'date': s[3], 'heure_debut': s[4], 'heure_fin': s[5],
+                    'salle_id': s[6], 'enseignant_id': s[7], 'groupe_id': s[8]
+                } for s in existing_seances
+            ] if existing_seances else []
+            
+            existing_reservations = self.db.get_toutes_reservations()
+            existing_reservations_dict = [
+                {
+                    'id': r[0], 'enseignant_id': r[1], 'salle_id': r[2],
+                    'date': r[3], 'heure_debut': r[4], 'heure_fin': r[5],
+                    'statut': r[6]
+                } for r in existing_reservations
+            ] if existing_reservations else []
+            
+            # Initialize generator
+            generator = ScheduleGenerator(self.db, existing_seances_dict, existing_reservations_dict)
+            
+            # Track teacher hours to balance workload
+            teacher_weekly_hours = {}
+            
+            # Define course types and durations
+            types_cours = [
+                ('Cours', 1.5, 2),   # Type, durée (heures), nb sessions par semaine
+                ('TD', 1.5, 1),
+                ('TP', 2.0, 1)
+            ]
+            
+            # Get subjects from config
+            from config import MATIERES_COMPLETES
+            
+            # List of common subjects for all groups
+            matieres_communes = [
+                "Algorithmique et Programmation",
+                "Bases de Données",
+                "Mathématiques",
+                "Analyse",
+                "Anglais",
+                "Statistiques",
+                "Réseaux",
+                "Systèmes d'Exploitation"
+            ]
+            
+            total_groups = len(groupes)
+            sessions_created = 0
+            errors = []
+            
+            # Process each group
+            for idx, groupe in enumerate(groupes):
+                groupe_id = groupe[0]
+                groupe_nom = groupe[1]
+                
+                # Update progress
+                progress_pct = int((idx / total_groups) * 100)
+                progress.setValue(progress_pct)
+                progress.setLabelText(f"Traitement du groupe: {groupe_nom}...")
+                
+                if progress.wasCanceled():
+                    break
+                
+                # Distribute subjects across teachers (round-robin)
+                enseignant_idx = idx % len(enseignants)
+                
+                for matiere_nom in matieres_communes[:5]:  # 5 subjects per group
+                    for type_seance, duree, nb_sessions in types_cours[:2]:  # Cours and TD
+                        # Get teacher for this subject (rotate)
+                        enseignant = enseignants[enseignant_idx % len(enseignants)]
+                        enseignant_id = enseignant[0]
+                        enseignant_idx += 1
+                        
+                        # Generate sessions
+                        try:
+                            sessions = generator.generate_schedule_for_group(
+                                groupe_id=groupe_id,
+                                matiere=matiere_nom,
+                                type_seance=type_seance,
+                                duree_heures=duree,
+                                enseignant_id=enseignant_id,
+                                nb_seances_semaine=nb_sessions,
+                                semaine_debut=semaine_debut,
+                                teacher_weekly_hours=teacher_weekly_hours
+                            )
+                            
+                            # Save sessions to database
+                            for session in sessions:
+                                seance_id = self.db.ajouter_seance(
+                                    titre=session['titre'],
+                                    type_seance=session['type_seance'],
+                                    date=session['date'],
+                                    heure_debut=session['heure_debut'],
+                                    heure_fin=session['heure_fin'],
+                                    salle_id=session['salle_id'],
+                                    enseignant_id=session['enseignant_id'],
+                                    groupe_id=session['groupe_id']
+                                )
+                                if seance_id:
+                                    sessions_created += 1
+                                    # Add to conflict detector
+                                    generator.conflict_detector.add_session({
+                                        'id': seance_id,
+                                        'date': session['date'],
+                                        'heure_debut': session['heure_debut'],
+                                        'heure_fin': session['heure_fin'],
+                                        'salle_id': session['salle_id'],
+                                        'enseignant_id': session['enseignant_id'],
+                                        'groupe_id': session['groupe_id']
+                                    })
+                        except Exception as e:
+                            errors.append(f"{groupe_nom}/{matiere_nom}: {str(e)}")
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Show results
+            if sessions_created > 0:
+                msg = f"Génération terminée avec succès !\n\n"
+                msg += f"• {sessions_created} séances créées\n"
+                msg += f"• {total_groups} groupes traités\n"
+                msg += f"• Semaine du {semaine_debut}\n\n"
+                msg += "Chaque étudiant et enseignant peut maintenant consulter son emploi du temps personnel."
+                
+                if errors:
+                    msg += f"\n\n⚠️ {len(errors)} avertissement(s)"
+                
+                QMessageBox.information(self, "Succès", msg)
+            else:
+                error_msg = "Aucune séance n'a pu être créée.\n\n"
+                if errors:
+                    error_msg += "Erreurs:\n" + "\n".join(errors[:5])
+                    if len(errors) > 5:
+                        error_msg += f"\n... et {len(errors) - 5} autres erreurs"
+                QMessageBox.warning(self, "Attention", error_msg)
+            
+            # Refresh dashboard
+            self.refresh_dashboard()
+            
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la génération:\n{str(e)}")
 
     def create_reservations_page(self):
         page = QWidget()
