@@ -1,0 +1,33 @@
+# Base de données (CRITIQUE - Ne jamais commit !)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/*.db
+data/backups/*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+venv/
+env/
+ENV/
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Fichiers sensibles
+.env
+.env.local
+
+# Exports
+exports/*.pdf
+exports/*.xlsx
+exports/*.xls

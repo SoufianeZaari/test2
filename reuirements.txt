@@ -1,0 +1,49 @@
+# requirements.txt - Dépendances Python pour FSTT Emploi du Temps
+
+# ═══════════════════════════════════════════════════════════
+# ACTUELLEMENT UTILISÉES (Votre partie)
+# ═══════════════════════════════════════════════════════════
+# Aucune dépendance externe pour l'instant !
+# SQLite est inclus avec Python
+# CSV est inclus avec Python
+
+# ═══════════════════════════════════════════════════════════
+# À INSTALLER PAR LES AUTRES MEMBRES
+# ═══════════════════════════════════════════════════════════
+
+# Interface graphique (Membre 2)
+PyQt6
+PyQt6-tools
+# Option 1 : Tkinter (déjà inclus avec Python)
+# Option 2 : Flask pour web app
+# flask==3.0.0
+# flask-login==0.6.3
+
+# Exports PDF (Membre 4)
+# reportlab==4.0.9
+
+# Exports Excel (Membre 4)
+# openpyxl==3.1.2
+
+# Exports iCal (Membre 4)
+# icalendar==5.0.11
+
+# Génération emploi du temps - Algorithmes (Membre 3)
+# numpy==1.26.3
+# pandas==2.1.4
+
+# Tests (Optionnel pour tous)
+# pytest==7.4.3
+# pytest-cov==4.1.0
+
+# ═══════════════════════════════════════════════════════════
+# NOTES D'INSTALLATION
+# ═══════════════════════════════════════════════════════════
+# Pour installer les dépendances de base :
+# pip install -r requirements.txt
+#
+# Pour installer seulement ce dont vous avez besoin :
+# pip install flask reportlab openpyxl
+#
+# Pour mettre à jour :
+# pip install --upgrade -r requirements.txt
