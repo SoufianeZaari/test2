@@ -404,6 +404,121 @@ class Enseignant(Utilisateur):
             bool: True si disponible
         """
         return not db.verifier_indisponibilite_enseignant(self.id, date)
+    
+    # ═══════════════════════════════════════════════════════════
+    # FONCTIONNALITÉS AVANCÉES - RATTRAPAGE & ABSENCE
+    # ═══════════════════════════════════════════════════════════
+    
+    def demander_rattrapage(self, db, groupe_id, salle_id, date, heure_debut, 
+                           heure_fin, matiere, seance_originale_id=None):
+        """
+        Réserve une salle pour un rattrapage avec verrouillage automatique
+        et notification aux étudiants.
+        
+        Args:
+            db: Instance de Database
+            groupe_id: ID du groupe concerné
+            salle_id: ID de la salle à réserver
+            date: Date du rattrapage (YYYY-MM-DD)
+            heure_debut: Heure de début (HH:MM)
+            heure_fin: Heure de fin (HH:MM)
+            matiere: Nom de la matière
+            seance_originale_id: ID de la séance originale (optionnel)
+        
+        Returns:
+            Dict avec 'success', 'rattrapage_id', 'message', 'notifications_envoyees'
+        """
+        from src.gestionnaire import GestionnaireRattrapage
+        
+        gestionnaire = GestionnaireRattrapage(db)
+        return gestionnaire.reserver_rattrapage(
+            enseignant_id=self.id,
+            groupe_id=groupe_id,
+            salle_id=salle_id,
+            date=date,
+            heure_debut=heure_debut,
+            heure_fin=heure_fin,
+            matiere=matiere,
+            seance_originale_id=seance_originale_id
+        )
+    
+    def signaler_absence(self, db, date_debut, date_fin, motif=None):
+        """
+        Signale une absence avec libération automatique des salles
+        et notification aux étudiants/admins.
+        
+        LOGIQUE CRITIQUE:
+        1. Identifie toutes les séances sur la période
+        2. Notifie les étudiants concernés
+        3. Notifie les administrateurs
+        4. LIBÈRE toutes les salles (supprime les séances)
+        
+        Args:
+            db: Instance de Database
+            date_debut: Date de début d'absence (YYYY-MM-DD)
+            date_fin: Date de fin d'absence (YYYY-MM-DD)
+            motif: Motif de l'absence (optionnel)
+        
+        Returns:
+            Dict avec statistiques détaillées de l'opération
+        """
+        from src.gestionnaire import GestionnaireAbsence
+        
+        gestionnaire = GestionnaireAbsence(db)
+        return gestionnaire.declarer_absence(
+            enseignant_id=self.id,
+            date_debut=date_debut,
+            date_fin=date_fin,
+            motif=motif
+        )
+    
+    def get_notifications(self, db, non_lues_seulement=False):
+        """
+        Récupère les notifications de l'enseignant
+        
+        Args:
+            db: Instance de Database
+            non_lues_seulement: Si True, retourne uniquement les non lues
+        
+        Returns:
+            list: Liste des notifications
+        """
+        from src.services_notification import NotificationService
+        
+        service = NotificationService(db)
+        return service.get_notifications_utilisateur(self.id, non_lues_seulement)
+    
+    def ecouter_emploi_du_temps(self, db, date=None):
+        """
+        Lit l'emploi du temps à voix haute (Text-to-Speech)
+        
+        Args:
+            db: Instance de Database
+            date: Date spécifique (optionnel)
+        
+        Returns:
+            Tuple (success, message)
+        """
+        from src.services_audio import AudioService
+        
+        audio_service = AudioService(db)
+        return audio_service.lire_emploi_du_temps_enseignant(self.id, date)
+    
+    def exporter_emploi_du_temps_audio(self, db, date=None):
+        """
+        Exporte l'emploi du temps en fichier audio
+        
+        Args:
+            db: Instance de Database
+            date: Date spécifique (optionnel)
+        
+        Returns:
+            Tuple (success, message, filepath)
+        """
+        from src.services_audio import AudioService
+        
+        audio_service = AudioService(db)
+        return audio_service.exporter_emploi_du_temps_enseignant(self.id, date)
 
 
 class Etudiant(Utilisateur):
@@ -486,6 +601,73 @@ class Etudiant(Utilisateur):
             output.append(f"    📍 Salle: {salle_nom}")
         
         return "\n".join(output)
+    
+    # ═══════════════════════════════════════════════════════════
+    # FONCTIONNALITÉS AVANCÉES - NOTIFICATIONS & AUDIO
+    # ═══════════════════════════════════════════════════════════
+    
+    def get_notifications(self, db, non_lues_seulement=False):
+        """
+        Récupère les notifications de l'étudiant
+        
+        Args:
+            db: Instance de Database
+            non_lues_seulement: Si True, retourne uniquement les non lues
+        
+        Returns:
+            list: Liste des notifications
+        """
+        from src.services_notification import NotificationService
+        
+        service = NotificationService(db)
+        return service.get_notifications_utilisateur(self.id, non_lues_seulement)
+    
+    def get_nb_notifications_non_lues(self, db):
+        """
+        Compte le nombre de notifications non lues
+        
+        Args:
+            db: Instance de Database
+        
+        Returns:
+            int: Nombre de notifications non lues
+        """
+        from src.services_notification import NotificationService
+        
+        service = NotificationService(db)
+        return service.get_nb_non_lues(self.id)
+    
+    def ecouter_emploi_du_temps(self, db, date=None):
+        """
+        Lit l'emploi du temps à voix haute (Text-to-Speech)
+        
+        Args:
+            db: Instance de Database
+            date: Date spécifique (optionnel)
+        
+        Returns:
+            Tuple (success, message)
+        """
+        from src.services_audio import AudioService
+        
+        audio_service = AudioService(db)
+        return audio_service.lire_emploi_du_temps_etudiant(self.id, date)
+    
+    def exporter_emploi_du_temps_audio(self, db, date=None):
+        """
+        Exporte l'emploi du temps en fichier audio
+        
+        Args:
+            db: Instance de Database
+            date: Date spécifique (optionnel)
+        
+        Returns:
+            Tuple (success, message, filepath)
+        """
+        from src.services_audio import AudioService
+        
+        audio_service = AudioService(db)
+        return audio_service.exporter_emploi_du_temps_etudiant(self.id, date)
 
 
 class Salle:

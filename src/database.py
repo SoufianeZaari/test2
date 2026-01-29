@@ -138,11 +138,48 @@ class Database:
             )
         ''')
         
+        # Table 9 : Notifications
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                destinataire_id INTEGER NOT NULL,
+                type_notification TEXT NOT NULL CHECK(type_notification IN ('rattrapage', 'absence', 'annulation', 'info', 'alerte')),
+                titre TEXT NOT NULL,
+                message TEXT NOT NULL,
+                lue INTEGER DEFAULT 0,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seance_id INTEGER,
+                FOREIGN KEY (destinataire_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+                FOREIGN KEY (seance_id) REFERENCES seances(id) ON DELETE SET NULL
+            )
+        ''')
+        
+        # Table 10 : Rattrapages (Makeup sessions)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS rattrapages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                enseignant_id INTEGER NOT NULL,
+                groupe_id INTEGER NOT NULL,
+                salle_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                heure_debut TEXT NOT NULL,
+                heure_fin TEXT NOT NULL,
+                motif TEXT,
+                statut TEXT DEFAULT 'confirmé' CHECK(statut IN ('confirmé', 'annulé')),
+                seance_originale_id INTEGER,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (enseignant_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
+                FOREIGN KEY (groupe_id) REFERENCES groupes(id) ON DELETE CASCADE,
+                FOREIGN KEY (salle_id) REFERENCES salles(id) ON DELETE CASCADE,
+                FOREIGN KEY (seance_originale_id) REFERENCES seances(id) ON DELETE SET NULL
+            )
+        ''')
+        
         conn.commit()
         conn.close()
         print("✅ Base de données initialisée avec succès!")
         print(f"📁 Fichier : {self.db_path}")
-        print(f"📊 Tables créées : 8 tables")
+        print(f"📊 Tables créées : 10 tables")
     
     # ═══════════════════════════════════════════════════════════
     # SÉCURITÉ ET BACKUP
@@ -961,3 +998,270 @@ class Database:
         
         conn.close()
         return filiere
+    
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES CRUD - NOTIFICATIONS
+    # ═══════════════════════════════════════════════════════════
+    
+    def ajouter_notification(self, destinataire_id, type_notification, titre, message, seance_id=None):
+        """Ajoute une notification pour un utilisateur"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO notifications (destinataire_id, type_notification, titre, message, seance_id)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (destinataire_id, type_notification, titre, message, seance_id))
+            
+            conn.commit()
+            notif_id = cursor.lastrowid
+            return notif_id
+        except Exception as e:
+            print(f"❌ Erreur notification: {e}")
+            return None
+        finally:
+            conn.close()
+    
+    def get_notifications_utilisateur(self, user_id, non_lues_seulement=False):
+        """Récupère les notifications d'un utilisateur"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        if non_lues_seulement:
+            cursor.execute('''
+                SELECT * FROM notifications 
+                WHERE destinataire_id = ? AND lue = 0
+                ORDER BY date_creation DESC
+            ''', (user_id,))
+        else:
+            cursor.execute('''
+                SELECT * FROM notifications 
+                WHERE destinataire_id = ?
+                ORDER BY date_creation DESC
+            ''', (user_id,))
+        
+        notifications = cursor.fetchall()
+        conn.close()
+        return notifications
+    
+    def marquer_notification_lue(self, notif_id):
+        """Marque une notification comme lue"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('UPDATE notifications SET lue = 1 WHERE id = ?', (notif_id,))
+        conn.commit()
+        nb_modif = cursor.rowcount
+        conn.close()
+        
+        return nb_modif > 0
+    
+    def get_nb_notifications_non_lues(self, user_id):
+        """Compte le nombre de notifications non lues"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM notifications 
+            WHERE destinataire_id = ? AND lue = 0
+        ''', (user_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result else 0
+    
+    def envoyer_notification_groupe(self, groupe_id, type_notification, titre, message, seance_id=None):
+        """Envoie une notification à tous les étudiants d'un groupe"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Récupérer tous les étudiants du groupe
+        cursor.execute('''
+            SELECT id FROM utilisateurs 
+            WHERE groupe_id = ? AND type_user = 'etudiant'
+        ''', (groupe_id,))
+        
+        etudiants = cursor.fetchall()
+        nb_envois = 0
+        
+        for etudiant in etudiants:
+            try:
+                cursor.execute('''
+                    INSERT INTO notifications (destinataire_id, type_notification, titre, message, seance_id)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (etudiant[0], type_notification, titre, message, seance_id))
+                nb_envois += 1
+            except Exception:
+                pass
+        
+        conn.commit()
+        conn.close()
+        return nb_envois
+    
+    def envoyer_notification_admins(self, type_notification, titre, message, seance_id=None):
+        """Envoie une notification à tous les administrateurs"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Récupérer tous les admins
+        cursor.execute("SELECT id FROM utilisateurs WHERE type_user = 'admin'")
+        admins = cursor.fetchall()
+        nb_envois = 0
+        
+        for admin in admins:
+            try:
+                cursor.execute('''
+                    INSERT INTO notifications (destinataire_id, type_notification, titre, message, seance_id)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (admin[0], type_notification, titre, message, seance_id))
+                nb_envois += 1
+            except Exception:
+                pass
+        
+        conn.commit()
+        conn.close()
+        return nb_envois
+    
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES CRUD - RATTRAPAGES
+    # ═══════════════════════════════════════════════════════════
+    
+    def ajouter_rattrapage(self, enseignant_id, groupe_id, salle_id, date, heure_debut, 
+                           heure_fin, motif=None, seance_originale_id=None):
+        """Ajoute une séance de rattrapage et verrouille la salle"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO rattrapages (enseignant_id, groupe_id, salle_id, date, 
+                                        heure_debut, heure_fin, motif, seance_originale_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (enseignant_id, groupe_id, salle_id, date, heure_debut, heure_fin, 
+                  motif, seance_originale_id))
+            
+            conn.commit()
+            rattrapage_id = cursor.lastrowid
+            return rattrapage_id
+        except Exception as e:
+            print(f"❌ Erreur rattrapage: {e}")
+            return None
+        finally:
+            conn.close()
+    
+    def get_rattrapages_groupe(self, groupe_id):
+        """Récupère tous les rattrapages d'un groupe"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM rattrapages 
+            WHERE groupe_id = ? AND statut = 'confirmé'
+            ORDER BY date, heure_debut
+        ''', (groupe_id,))
+        
+        rattrapages = cursor.fetchall()
+        conn.close()
+        return rattrapages
+    
+    def get_rattrapages_enseignant(self, enseignant_id):
+        """Récupère tous les rattrapages d'un enseignant"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM rattrapages 
+            WHERE enseignant_id = ? AND statut = 'confirmé'
+            ORDER BY date, heure_debut
+        ''', (enseignant_id,))
+        
+        rattrapages = cursor.fetchall()
+        conn.close()
+        return rattrapages
+    
+    def annuler_rattrapage(self, rattrapage_id):
+        """Annule un rattrapage (libère la salle)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE rattrapages SET statut = 'annulé' WHERE id = ?
+        ''', (rattrapage_id,))
+        
+        conn.commit()
+        nb_modif = cursor.rowcount
+        conn.close()
+        return nb_modif > 0
+    
+    def verifier_salle_occupee_rattrapage(self, salle_id, date, heure_debut, heure_fin):
+        """Vérifie si une salle est occupée par un rattrapage"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM rattrapages 
+            WHERE salle_id = ? AND date = ? AND statut = 'confirmé'
+            AND NOT (heure_fin <= ? OR heure_debut >= ?)
+        ''', (salle_id, date, heure_debut, heure_fin))
+        
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] > 0
+    
+    def get_seances_enseignant_periode(self, enseignant_id, date_debut, date_fin):
+        """Récupère toutes les séances d'un enseignant sur une période"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM seances 
+            WHERE enseignant_id = ? AND date >= ? AND date <= ?
+            ORDER BY date, heure_debut
+        ''', (enseignant_id, date_debut, date_fin))
+        
+        seances = cursor.fetchall()
+        conn.close()
+        return seances
+    
+    def liberer_seances_enseignant(self, enseignant_id, date_debut, date_fin):
+        """
+        Libère (supprime) toutes les séances d'un enseignant sur une période.
+        Retourne la liste des séances supprimées pour notification.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # D'abord récupérer les séances pour les notifier
+        cursor.execute('''
+            SELECT * FROM seances 
+            WHERE enseignant_id = ? AND date >= ? AND date <= ?
+        ''', (enseignant_id, date_debut, date_fin))
+        
+        seances_a_supprimer = cursor.fetchall()
+        
+        # Supprimer les séances
+        cursor.execute('''
+            DELETE FROM seances 
+            WHERE enseignant_id = ? AND date >= ? AND date <= ?
+        ''', (enseignant_id, date_debut, date_fin))
+        
+        conn.commit()
+        nb_supprime = cursor.rowcount
+        conn.close()
+        
+        return seances_a_supprimer, nb_supprime
+    
+    def get_etudiants_groupe(self, groupe_id):
+        """Récupère tous les étudiants d'un groupe"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM utilisateurs 
+            WHERE groupe_id = ? AND type_user = 'etudiant'
+        ''', (groupe_id,))
+        
+        etudiants = cursor.fetchall()
+        conn.close()
+        return etudiants
