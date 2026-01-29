@@ -44,6 +44,11 @@ APP_CONFIG = {
     'auteurs': 'Équipe Python FST'
 }
 
+# Constants for export service compatibility
+EXPORT_FOLDER = str(EXPORTS_DIR)
+ETABLISSEMENT = APP_CONFIG['etablissement']
+ANNEE_UNIVERSITAIRE = APP_CONFIG['annee_universitaire']
+
 # ═══════════════════════════════════════════════════════════════
 # CYCLES D'ÉTUDES FST TANGER (LMD)
 # ═══════════════════════════════════════════════════════════════

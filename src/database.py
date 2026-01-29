@@ -773,3 +773,191 @@ class Database:
         conn.close()
         
         return True
+    
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES CRUD - DISPONIBILITÉS (INDISPONIBILITÉS ENSEIGNANTS)
+    # ═══════════════════════════════════════════════════════════
+    
+    def ajouter_disponibilite(self, enseignant_id, date_debut, date_fin, motif=""):
+        """
+        Ajoute une indisponibilité pour un enseignant
+        
+        Args:
+            enseignant_id: ID de l'enseignant
+            date_debut: Date de début au format YYYY-MM-DD
+            date_fin: Date de fin au format YYYY-MM-DD
+            motif: Raison de l'indisponibilité
+        
+        Returns:
+            int: ID de la disponibilité créée
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO disponibilites (enseignant_id, date_debut, date_fin, motif)
+            VALUES (?, ?, ?, ?)
+        ''', (enseignant_id, date_debut, date_fin, motif))
+        
+        conn.commit()
+        dispo_id = cursor.lastrowid
+        conn.close()
+        
+        return dispo_id
+    
+    def get_disponibilites_by_enseignant(self, enseignant_id):
+        """
+        Récupère les indisponibilités d'un enseignant
+        
+        Args:
+            enseignant_id: ID de l'enseignant
+        
+        Returns:
+            list: Liste des indisponibilités
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM disponibilites 
+            WHERE enseignant_id = ?
+            ORDER BY date_debut DESC
+        ''', (enseignant_id,))
+        
+        disponibilites = cursor.fetchall()
+        conn.close()
+        
+        return disponibilites
+    
+    def supprimer_disponibilite(self, dispo_id):
+        """
+        Supprime une indisponibilité
+        
+        Args:
+            dispo_id: ID de la disponibilité
+        
+        Returns:
+            bool: True si succès
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM disponibilites WHERE id = ?', (dispo_id,))
+        nb_supprime = cursor.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        return nb_supprime > 0
+    
+    def verifier_indisponibilite_enseignant(self, enseignant_id, date):
+        """
+        Vérifie si un enseignant est indisponible à une date donnée
+        
+        Args:
+            enseignant_id: ID de l'enseignant
+            date: Date au format YYYY-MM-DD
+        
+        Returns:
+            bool: True si indisponible
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM disponibilites 
+            WHERE enseignant_id = ? AND date_debut <= ? AND date_fin >= ?
+        ''', (enseignant_id, date, date))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result is not None
+    
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES UTILITAIRES - SÉANCES
+    # ═══════════════════════════════════════════════════════════
+    
+    def get_toutes_seances(self):
+        """Récupère toutes les séances"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM seances ORDER BY date, heure_debut')
+        seances = cursor.fetchall()
+        
+        conn.close()
+        return seances
+    
+    def get_seances_by_date(self, date):
+        """Récupère les séances pour une date donnée"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM seances 
+            WHERE date = ?
+            ORDER BY heure_debut
+        ''', (date,))
+        
+        seances = cursor.fetchall()
+        conn.close()
+        
+        return seances
+    
+    def supprimer_seance(self, seance_id):
+        """Supprime une séance par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM seances WHERE id = ?', (seance_id,))
+        nb_supprime = cursor.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        return nb_supprime > 0
+    
+    def get_toutes_reservations(self):
+        """Récupère toutes les réservations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM reservations ORDER BY date_demande DESC')
+        reservations = cursor.fetchall()
+        
+        conn.close()
+        return reservations
+    
+    def get_salle_by_id(self, salle_id):
+        """Récupère une salle par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM salles WHERE id = ?', (salle_id,))
+        salle = cursor.fetchone()
+        
+        conn.close()
+        return salle
+    
+    def get_groupe_by_id(self, groupe_id):
+        """Récupère un groupe par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM groupes WHERE id = ?', (groupe_id,))
+        groupe = cursor.fetchone()
+        
+        conn.close()
+        return groupe
+    
+    def get_filiere_by_id(self, filiere_id):
+        """Récupère une filière par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM filieres WHERE id = ?', (filiere_id,))
+        filiere = cursor.fetchone()
+        
+        conn.close()
+        return filiere

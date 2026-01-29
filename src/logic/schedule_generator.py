@@ -109,7 +109,8 @@ class ScheduleGenerator:
         if not groupe:
             conn.close()
             return []
-        effectif = groupe['effectif']
+        # Handle both tuple and dict access
+        effectif = groupe[0] if isinstance(groupe, tuple) else groupe.get('effectif', 0)
         conn.close()
         
         # Get available rooms with sufficient capacity
@@ -153,8 +154,27 @@ class ScheduleGenerator:
                 "SELECT * FROM salles WHERE capacite >= ? ORDER BY capacite",
                 (min_capacity,)
             )
-            rooms = [dict(row) for row in cursor.fetchall()]
+            rows = cursor.fetchall()
             conn.close()
+            
+            # Convert tuples to dicts
+            rooms = []
+            for row in rows:
+                if isinstance(row, tuple):
+                    rooms.append({
+                        'id': row[0],
+                        'nom': row[1],
+                        'capacite': row[2],
+                        'type_salle': row[3],
+                        'equipements': row[4] or ""
+                    })
+                elif isinstance(row, dict):
+                    rooms.append(row)
+                else:
+                    try:
+                        rooms.append(dict(row))
+                    except:
+                        continue
             return rooms
         except Exception as e:
             print(f"Erreur lors de la récupération des salles: {e}")
