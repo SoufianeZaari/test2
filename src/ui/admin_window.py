@@ -493,7 +493,9 @@ class AdminWindow(QWidget):
     def run_generate_timetable(self):
         """
         Génère l'emploi du temps complet pour tous les groupes.
-        Chaque groupe obtient ses cours, TD et TP assignés aux enseignants.
+        Chaque groupe obtient ses cours et TD assignés aux enseignants.
+        Note: Les TP ne sont pas générés automatiquement car ils nécessitent
+        des salles spéciales (laboratoires) et une planification manuelle.
         """
         from src.logic.schedule_generator import ScheduleGenerator
         from datetime import datetime, timedelta
@@ -531,11 +533,13 @@ class AdminWindow(QWidget):
                 return
             
             # Calculate start week (next Monday)
+            # weekday(): Monday=0, Sunday=6
+            # We want to find how many days until next Monday
             today = datetime.now()
-            days_ahead = (7 - today.weekday()) % 7
-            if days_ahead == 0:
-                days_ahead = 7
-            next_monday = today + timedelta(days=days_ahead)
+            days_until_monday = (7 - today.weekday()) % 7
+            if days_until_monday == 0:  # If today is Monday, go to next Monday
+                days_until_monday = 7
+            next_monday = today + timedelta(days=days_until_monday)
             semaine_debut = next_monday.strftime("%Y-%m-%d")
             
             # Get existing sessions to avoid conflicts
@@ -563,17 +567,18 @@ class AdminWindow(QWidget):
             # Track teacher hours to balance workload
             teacher_weekly_hours = {}
             
-            # Define course types and durations
+            # Define course types and durations for automatic generation
+            # Note: TP sessions are excluded as they require laboratory rooms 
+            # and specialized equipment that needs manual planning
+            NB_SUBJECTS_PER_GROUP = 5  # Number of subjects to generate per group
             types_cours = [
                 ('Cours', 1.5, 2),   # Type, durée (heures), nb sessions par semaine
-                ('TD', 1.5, 1),
-                ('TP', 2.0, 1)
+                ('TD', 1.5, 1),      # TD = Travaux Dirigés
+                # TP excluded: requires manual planning with lab rooms
             ]
             
-            # Get subjects from config
-            from config import MATIERES_COMPLETES
-            
             # List of common subjects for all groups
+            # These represent typical subjects in an engineering curriculum
             matieres_communes = [
                 "Algorithmique et Programmation",
                 "Bases de Données",
@@ -589,6 +594,9 @@ class AdminWindow(QWidget):
             sessions_created = 0
             errors = []
             
+            # Global teacher assignment counter for even distribution
+            global_teacher_idx = 0
+            
             # Process each group
             for idx, groupe in enumerate(groupes):
                 groupe_id = groupe[0]
@@ -602,15 +610,13 @@ class AdminWindow(QWidget):
                 if progress.wasCanceled():
                     break
                 
-                # Distribute subjects across teachers (round-robin)
-                enseignant_idx = idx % len(enseignants)
-                
-                for matiere_nom in matieres_communes[:5]:  # 5 subjects per group
-                    for type_seance, duree, nb_sessions in types_cours[:2]:  # Cours and TD
-                        # Get teacher for this subject (rotate)
-                        enseignant = enseignants[enseignant_idx % len(enseignants)]
+                # Generate sessions for each subject (limited to NB_SUBJECTS_PER_GROUP)
+                for matiere_nom in matieres_communes[:NB_SUBJECTS_PER_GROUP]:
+                    for type_seance, duree, nb_sessions in types_cours:
+                        # Get teacher using global counter for even distribution
+                        enseignant = enseignants[global_teacher_idx % len(enseignants)]
                         enseignant_id = enseignant[0]
-                        enseignant_idx += 1
+                        global_teacher_idx += 1
                         
                         # Generate sessions
                         try:
@@ -639,7 +645,7 @@ class AdminWindow(QWidget):
                                 )
                                 if seance_id:
                                     sessions_created += 1
-                                    # Add to conflict detector
+                                    # Add to conflict detector for incremental updates
                                     generator.conflict_detector.add_session({
                                         'id': seance_id,
                                         'date': session['date'],
