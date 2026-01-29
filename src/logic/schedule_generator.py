@@ -173,7 +173,7 @@ class ScheduleGenerator:
                 else:
                     try:
                         rooms.append(dict(row))
-                    except:
+                    except (TypeError, ValueError):
                         continue
             return rooms
         except Exception as e:

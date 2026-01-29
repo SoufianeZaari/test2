@@ -1,8 +1,0 @@
-Emploi du Temps - GI-L3-A
-Faculté des Sciences et Techniques - Tanger - 2025/2026
-Période: 02/02/2026 - 02/02/2026
-
-
-Lundi:
-  08:00 - 09:30 - Programmation Python (Cours)
-    Salle: Salle A2

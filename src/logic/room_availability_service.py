@@ -21,6 +21,62 @@ class RoomAvailabilityService:
         self.existing_seances = existing_seances
         self.existing_reservations = existing_reservations
 
+    def _convert_room_tuple_to_dict(self, room) -> Optional[Dict]:
+        """
+        Converts a room tuple or row to a dictionary.
+        
+        Args:
+            room: Tuple, dict, or sqlite Row object
+            
+        Returns:
+            Dictionary with room data or None if conversion fails
+        """
+        if isinstance(room, tuple):
+            return {
+                'id': room[0],
+                'nom': room[1],
+                'capacite': room[2],
+                'type_salle': room[3],
+                'equipements': room[4] or ""
+            }
+        elif isinstance(room, dict):
+            return room
+        else:
+            try:
+                return {
+                    'id': room['id'],
+                    'nom': room['nom'],
+                    'capacite': room['capacite'],
+                    'type_salle': room['type_salle'],
+                    'equipements': room['equipements'] or ""
+                }
+            except (TypeError, KeyError):
+                return None
+
+    def _convert_seance_tuple_to_dict(self, seance) -> Optional[Dict]:
+        """
+        Converts a seance tuple or row to a dictionary.
+        
+        Args:
+            seance: Tuple, dict, or sqlite Row object
+            
+        Returns:
+            Dictionary with seance data or None if conversion fails
+        """
+        if isinstance(seance, tuple):
+            return {
+                'id': seance[0], 'titre': seance[1], 'type_seance': seance[2],
+                'date': seance[3], 'heure_debut': seance[4], 'heure_fin': seance[5],
+                'salle_id': seance[6], 'enseignant_id': seance[7], 'groupe_id': seance[8]
+            }
+        elif isinstance(seance, dict):
+            return seance
+        else:
+            try:
+                return dict(seance)
+            except (TypeError, ValueError):
+                return None
+
     def find_available_rooms(self, date: str, heure_debut: str, heure_fin: str, 
                            min_capacite: int = 0, type_salle: Optional[str] = None) -> List[Dict]:
         """
@@ -41,31 +97,11 @@ class RoomAvailabilityService:
         all_rooms_tuples = self.db.get_toutes_salles()
         
         # Convertir les tuples en dictionnaires
-        # Structure: (id, nom, capacite, type_salle, equipements)
         all_rooms = []
         for room in all_rooms_tuples:
-            if isinstance(room, tuple):
-                all_rooms.append({
-                    'id': room[0],
-                    'nom': room[1],
-                    'capacite': room[2],
-                    'type_salle': room[3],
-                    'equipements': room[4] or ""
-                })
-            elif isinstance(room, dict):
-                all_rooms.append(room)
-            else:
-                # Essayer d'accéder comme un objet sqlite Row
-                try:
-                    all_rooms.append({
-                        'id': room['id'],
-                        'nom': room['nom'],
-                        'capacite': room['capacite'],
-                        'type_salle': room['type_salle'],
-                        'equipements': room['equipements'] or ""
-                    })
-                except:
-                    continue
+            room_dict = self._convert_room_tuple_to_dict(room)
+            if room_dict:
+                all_rooms.append(room_dict)
         
         # Filtrer d'abord par capacité et type (Optimisation des performances)
         candidate_rooms = []
@@ -91,19 +127,9 @@ class RoomAvailabilityService:
             # Convertir en dictionnaires
             todays_seances = []
             for s in seances_tuples:
-                if isinstance(s, tuple):
-                    todays_seances.append({
-                        'id': s[0], 'titre': s[1], 'type_seance': s[2],
-                        'date': s[3], 'heure_debut': s[4], 'heure_fin': s[5],
-                        'salle_id': s[6], 'enseignant_id': s[7], 'groupe_id': s[8]
-                    })
-                elif isinstance(s, dict):
-                    todays_seances.append(s)
-                else:
-                    try:
-                        todays_seances.append(dict(s))
-                    except:
-                        continue
+                seance_dict = self._convert_seance_tuple_to_dict(s)
+                if seance_dict:
+                    todays_seances.append(seance_dict)
 
         # Ajouter les réservations validées
         if self.existing_reservations:

@@ -71,7 +71,7 @@ class TimetableExportService:
                 else:
                     try:
                         seances_dict.append(dict(s))
-                    except:
+                    except (TypeError, ValueError):
                         continue
             
             # Prepare data for export
@@ -140,7 +140,7 @@ class TimetableExportService:
                 else:
                     try:
                         seances_dict.append(dict(s))
-                    except:
+                    except (TypeError, ValueError):
                         continue
             
             # Get approved reservations for the teacher
@@ -179,7 +179,7 @@ class TimetableExportService:
                             'enseignant_id': res_dict['enseignant_id'],
                             'groupe_id': None
                         })
-                    except:
+                    except (TypeError, KeyError, ValueError):
                         continue
             
             conn.close()
