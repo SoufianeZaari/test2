@@ -23,11 +23,15 @@ from src.ui.styles import (
 
 class UserWrapper:
     def __init__(self, user_tuple):
+        # Structure: (id, nom, prenom, email, mot_de_passe, type_user, specialite, groupe_id, duree_max_jour, date_creation)
         self.id = user_tuple[0]
         self.nom = user_tuple[1]
         self.prenom = user_tuple[2]
         self.email = user_tuple[3]
-        # Map other fields if necessary
+        self.type_user = user_tuple[5] if len(user_tuple) > 5 else None
+        self.specialite = user_tuple[6] if len(user_tuple) > 6 else None
+        self.groupe_id = user_tuple[7] if len(user_tuple) > 7 else None
+        self.duree_max_jour = user_tuple[8] if len(user_tuple) > 8 else 480
 
 class EnseignantWindow(QWidget):
     logout_signal = pyqtSignal()
@@ -142,23 +146,43 @@ class EnseignantWindow(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         
-        # Actions (Imprimer)
-        actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
+        # En-tête avec infos enseignant
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            background-color: white; 
+            border-radius: 10px; 
+            padding: 15px;
+            border: 1px solid #E0E0E0;
+        """)
+        h_layout = QHBoxLayout(header_frame)
         
-        for fmt in ["PDF", "Excel", "Image"]:
-            btn = QPushButton(f"Imprimer {fmt}")
+        # Info Enseignant
+        specialite = getattr(self.user, 'specialite', None) or "N/A"
+        info_str = f"""
+        <div style='font-size: 16px; color: {COLORS['text_dark']};'>
+            <b>Enseignant:</b> {self.user.prenom} {self.user.nom} | 
+            <b>Spécialité:</b> {specialite}
+        </div>
+        """
+        info_label = QLabel(info_str)
+        info_label.setTextFormat(Qt.TextFormat.RichText)
+        h_layout.addWidget(info_label)
+        h_layout.addStretch()
+        
+        # Actions (Export) with real functionality
+        for fmt in ["PDF", "Excel", "PNG"]:
+            btn = QPushButton(f"Télécharger {fmt}")
             btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
-            btn.clicked.connect(lambda _, f=fmt: QMessageBox.information(self, "Export", f"Export {f} lancé..."))
-            actions_layout.addWidget(btn)
-            
-        layout.addLayout(actions_layout)
+            btn.clicked.connect(lambda _, f=fmt: self.export_timetable(f))
+            h_layout.addWidget(btn)
+        
+        layout.addWidget(header_frame)
         
         # Table
         self.schedule_table = QTableWidget(5, 6)
         self.schedule_table.setHorizontalHeaderLabels(["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"])
         time_slots = ["08:30 - 10:00", "10:15 - 11:45", "12:00 - 13:30", "13:45 - 15:15", "15:30 - 17:00"]
-        self.schedule_table.setVerticalHeaderLabels(time_slots) # Using standard slots roughly
+        self.schedule_table.setVerticalHeaderLabels(time_slots)
         self.schedule_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.schedule_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.schedule_table.setStyleSheet(TABLE_STYLE)
@@ -168,6 +192,38 @@ class EnseignantWindow(QWidget):
         
         layout.addWidget(self.schedule_table)
         return page
+    
+    def export_timetable(self, format_type):
+        """Export the teacher's personal timetable to the specified format"""
+        try:
+            from src.logic.timetable_export_service import TimetableExportService
+            
+            export_service = TimetableExportService(self.db)
+            
+            # Map format
+            format_map = {"PDF": "pdf", "Excel": "excel", "PNG": "png"}
+            export_format = format_map.get(format_type, "pdf")
+            
+            # Export
+            success, filepath, error = export_service.export_teacher_timetable(
+                self.user.id, 
+                export_format
+            )
+            
+            if success and filepath:
+                QMessageBox.information(
+                    self, 
+                    "Export Réussi", 
+                    f"Votre emploi du temps a été exporté avec succès!\n\nFichier: {filepath}"
+                )
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Erreur d'Export", 
+                    f"L'export a échoué: {error or 'Erreur inconnue'}"
+                )
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
 
     def load_schedule(self):
         """Charge l'emploi du temps de l'enseignant"""

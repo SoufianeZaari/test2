@@ -24,10 +24,14 @@ import os
 
 class UserWrapper:
     def __init__(self, user_tuple):
+        # Structure: (id, nom, prenom, email, mot_de_passe, type_user, specialite, groupe_id, duree_max_jour, date_creation)
         self.id = user_tuple[0]
         self.nom = user_tuple[1]
         self.prenom = user_tuple[2]
         self.email = user_tuple[3]
+        self.type_user = user_tuple[5] if len(user_tuple) > 5 else None
+        self.specialite = user_tuple[6] if len(user_tuple) > 6 else None
+        self.groupe_id = user_tuple[7] if len(user_tuple) > 7 else None
 
 class EtudiantWindow(QWidget):
     logout_signal = pyqtSignal()
@@ -98,9 +102,17 @@ class EtudiantWindow(QWidget):
             
         layout.addStretch()
         
-        # Footer
-        group_text = "LST-GI" # Mock group
-        user_lbl = QLabel(f"Étudiant\nGroupe: {group_text}")
+        # Footer - Get actual group name
+        group_text = "Non assigné"
+        if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
+            try:
+                groupe = self.db.get_groupe_by_id(self.user.groupe_id)
+                if groupe:
+                    group_text = groupe[1] if isinstance(groupe, tuple) else groupe.get('nom', 'N/A')
+            except:
+                pass
+                
+        user_lbl = QLabel(f"{self.user.prenom} {self.user.nom}\nGroupe: {group_text}")
         user_lbl.setStyleSheet(SIDEBAR_USER_INFO_STYLE)
         user_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(user_lbl)
@@ -151,11 +163,22 @@ class EtudiantWindow(QWidget):
         """)
         h_layout = QHBoxLayout(header_frame)
         
+        # Get groupe name
+        groupe_nom = "N/A"
+        if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
+            try:
+                groupe = self.db.get_groupe_by_id(self.user.groupe_id)
+                if groupe:
+                    groupe_nom = groupe[1] if isinstance(groupe, tuple) else groupe.get('nom', 'N/A')
+            except:
+                pass
+        
         # Info Étudiant
         info_str = f"""
         <div style='font-size: 16px; color: {COLORS['text_dark']};'>
             <b>Étudiant:</b> {self.user.nom} {self.user.prenom} | 
-            <b>Email:</b> {self.user.email}
+            <b>Email:</b> {self.user.email} |
+            <b>Groupe:</b> {groupe_nom}
         </div>
         """
         info_label = QLabel(info_str)
@@ -163,11 +186,11 @@ class EtudiantWindow(QWidget):
         h_layout.addWidget(info_label)
         h_layout.addStretch()
         
-        # Actions (Imprimer)
-        for fmt in ["PDF", "Excel", "Image"]:
-            btn = QPushButton(f"Imprimer {fmt}")
+        # Actions (Imprimer) with real export functionality
+        for fmt in ["PDF", "Excel", "PNG"]:
+            btn = QPushButton(f"Télécharger {fmt}")
             btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
-            btn.clicked.connect(lambda _, f=fmt: QMessageBox.information(self, "Export", f"Export {f} lancé..."))
+            btn.clicked.connect(lambda _, f=fmt: self.export_timetable(f))
             h_layout.addWidget(btn)
             
         layout.addWidget(header_frame)
@@ -186,6 +209,43 @@ class EtudiantWindow(QWidget):
         
         layout.addWidget(self.schedule_table)
         return page
+    
+    def export_timetable(self, format_type):
+        """Export the student's group timetable to the specified format"""
+        if not hasattr(self.user, 'groupe_id') or not self.user.groupe_id:
+            QMessageBox.warning(self, "Erreur", "Vous n'êtes associé à aucun groupe.")
+            return
+        
+        try:
+            from src.logic.timetable_export_service import TimetableExportService
+            from PyQt6.QtWidgets import QFileDialog
+            
+            export_service = TimetableExportService(self.db)
+            
+            # Map format
+            format_map = {"PDF": "pdf", "Excel": "excel", "PNG": "png"}
+            export_format = format_map.get(format_type, "pdf")
+            
+            # Export
+            success, filepath, error = export_service.export_group_timetable(
+                self.user.groupe_id, 
+                export_format
+            )
+            
+            if success and filepath:
+                QMessageBox.information(
+                    self, 
+                    "Export Réussi", 
+                    f"Votre emploi du temps a été exporté avec succès!\n\nFichier: {filepath}"
+                )
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Erreur d'Export", 
+                    f"L'export a échoué: {error or 'Erreur inconnue'}"
+                )
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
 
     def load_schedule(self):
         self.schedule_table.clearContents()
