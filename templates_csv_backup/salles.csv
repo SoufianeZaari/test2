@@ -1,0 +1,78 @@
+nom,capacite,type_salle,equipements
+B01,35,Salle,videoprojecteur
+B02,35,Salle,videoprojecteur
+B03,35,Salle,videoprojecteur
+B04,35,Salle,videoprojecteur
+B05,35,Salle,videoprojecteur
+B06,35,Salle,videoprojecteur
+B07,35,Salle,videoprojecteur
+B08,35,Salle,videoprojecteur
+B09,35,Salle,videoprojecteur
+B10,35,Salle,videoprojecteur
+B11,35,Salle,videoprojecteur
+B12,35,Salle,videoprojecteur
+B13,35,Salle,videoprojecteur
+B14,35,Salle,videoprojecteur
+B15,35,Salle,videoprojecteur
+B16,35,Salle,videoprojecteur
+B17,35,Salle,videoprojecteur
+C01,35,Salle,videoprojecteur
+C02,35,Salle,videoprojecteur
+C03,35,Salle,videoprojecteur
+C04,35,Salle,videoprojecteur
+C05,35,Salle,videoprojecteur
+C06,35,Salle,videoprojecteur
+C07,35,Salle,videoprojecteur
+C08,35,Salle,videoprojecteur
+C09,35,Salle,videoprojecteur
+C10,35,Salle,videoprojecteur
+C11,40,Salle,videoprojecteur
+C12,38,Salle,videoprojecteur
+C13,35,Salle,videoprojecteur
+C14,35,Salle,videoprojecteur
+C15,35,Salle,videoprojecteur
+C16,35,Salle,videoprojecteur
+C17,35,Salle,videoprojecteur
+E11,40,Salle,videoprojecteur
+E12,35,Salle,videoprojecteur
+E13,35,Salle,videoprojecteur
+E14,40,Salle,videoprojecteur
+E15,45,Salle,videoprojecteur
+E16,35,Salle,videoprojecteur
+E17,40,Salle,videoprojecteur
+E18,40,Salle,videoprojecteur
+F01,45,Salle,videoprojecteur
+F02,35,Salle,videoprojecteur
+F03,35,Salle,videoprojecteur
+F04,40,Salle,videoprojecteur
+F05,35,Salle,videoprojecteur
+F06,35,Salle,videoprojecteur
+F07,40,Salle,videoprojecteur
+F08,35,Salle,videoprojecteur
+F09,35,Salle,videoprojecteur
+F10,40,Salle,videoprojecteur
+F11,35,Salle,videoprojecteur
+F12,38,Salle,videoprojecteur
+F13,40,Salle,videoprojecteur
+F14,40,Salle,videoprojecteur
+Amphi 1,200,Amphithéâtre,videoprojecteur;micro;sonorisation
+Amphi 2,180,Amphithéâtre,videoprojecteur;micro;sonorisation
+Amphi 3,180,Amphithéâtre,videoprojecteur;micro;sonorisation
+Amphi 4,200,Amphithéâtre,videoprojecteur;micro;sonorisation
+Amphi 5,220,Amphithéâtre,videoprojecteur;micro;sonorisation
+Amphi 6,150,Amphithéâtre,videoprojecteur;micro;sonorisation
+Labo Info 1,30,Laboratoire,ordinateurs;videoprojecteur;reseau
+Labo Info 2,30,Laboratoire,ordinateurs;videoprojecteur;reseau
+Labo Info 3,25,Laboratoire,ordinateurs;videoprojecteur;reseau
+Labo Math 1,25,Laboratoire,videoprojecteur;tableau
+Labo Math 2,25,Laboratoire,videoprojecteur;tableau
+Labo Chimie 1,20,Laboratoire,paillasse;hotte;equipements_chimie
+Labo Chimie 2,20,Laboratoire,paillasse;hotte;equipements_chimie
+Labo Chimie 3,20,Laboratoire,paillasse;hotte;equipements_chimie
+Labo Physique 1,20,Laboratoire,oscilloscope;alimentations;multimetres
+Labo Physique 2,20,Laboratoire,oscilloscope;alimentations;multimetres
+Labo Bio 1,20,Laboratoire,microscopes;autoclave;centrifugeuse
+Labo Bio 2,20,Laboratoire,microscopes;autoclave;centrifugeuse
+Labo Bio 3,20,Laboratoire,microscopes;autoclave;centrifugeuse
+Labo GM 1,25,Laboratoire,machines_outils;equipements_mecanique
+Salle Info Dept GM,30,Laboratoire,ordinateurs;videoprojecteur;logiciels_cao
