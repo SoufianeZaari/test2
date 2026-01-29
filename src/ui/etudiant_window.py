@@ -58,6 +58,17 @@ class EtudiantWindow(QWidget):
         self.create_sidebar()
         self.create_content_area()
         self.switch_page("Emploi du Temps")
+    
+    def _get_user_group_name(self):
+        """Helper method to get the user's group name"""
+        if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
+            try:
+                groupe = self.db.get_groupe_by_id(self.user.groupe_id)
+                if groupe:
+                    return groupe[1] if isinstance(groupe, tuple) else groupe.get('nom', 'N/A')
+            except Exception:
+                pass
+        return "Non assigné"
 
     def create_sidebar(self):
         """Menu latéral Étudiant"""
@@ -102,15 +113,8 @@ class EtudiantWindow(QWidget):
             
         layout.addStretch()
         
-        # Footer - Get actual group name
-        group_text = "Non assigné"
-        if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
-            try:
-                groupe = self.db.get_groupe_by_id(self.user.groupe_id)
-                if groupe:
-                    group_text = groupe[1] if isinstance(groupe, tuple) else groupe.get('nom', 'N/A')
-            except:
-                pass
+        # Footer - Get actual group name using helper method
+        group_text = self._get_user_group_name()
                 
         user_lbl = QLabel(f"{self.user.prenom} {self.user.nom}\nGroupe: {group_text}")
         user_lbl.setStyleSheet(SIDEBAR_USER_INFO_STYLE)
@@ -163,15 +167,8 @@ class EtudiantWindow(QWidget):
         """)
         h_layout = QHBoxLayout(header_frame)
         
-        # Get groupe name
-        groupe_nom = "N/A"
-        if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
-            try:
-                groupe = self.db.get_groupe_by_id(self.user.groupe_id)
-                if groupe:
-                    groupe_nom = groupe[1] if isinstance(groupe, tuple) else groupe.get('nom', 'N/A')
-            except:
-                pass
+        # Get groupe name using helper method
+        groupe_nom = self._get_user_group_name()
         
         # Info Étudiant
         info_str = f"""
@@ -213,12 +210,15 @@ class EtudiantWindow(QWidget):
     def export_timetable(self, format_type):
         """Export the student's group timetable to the specified format"""
         if not hasattr(self.user, 'groupe_id') or not self.user.groupe_id:
-            QMessageBox.warning(self, "Erreur", "Vous n'êtes associé à aucun groupe.")
+            QMessageBox.warning(
+                self, 
+                "Groupe Non Assigné", 
+                "Vous n'êtes associé à aucun groupe. Veuillez contacter l'administration."
+            )
             return
         
         try:
             from src.logic.timetable_export_service import TimetableExportService
-            from PyQt6.QtWidgets import QFileDialog
             
             export_service = TimetableExportService(self.db)
             
@@ -245,7 +245,11 @@ class EtudiantWindow(QWidget):
                     f"L'export a échoué: {error or 'Erreur inconnue'}"
                 )
         except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Erreur d'Export", 
+                f"Une erreur inattendue s'est produite lors de l'export.\n\nDétails: {str(e)}"
+            )
 
     def load_schedule(self):
         self.schedule_table.clearContents()

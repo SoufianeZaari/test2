@@ -4,6 +4,10 @@ import os
 from src.database import Database
 from config import COLONNES_ETUDIANTS, COLONNES_ENSEIGNANTS, COLONNES_SALLES, COLONNES_GROUPES
 
+# Default filière level for auto-created filières during CSV import
+# L3 (Licence 3) is the most common level at FSTT for undergraduate programs
+DEFAULT_FILIERE_NIVEAU = "L3"
+
 class ImportManager:
     """Classe pour gérer les imports massifs CSV de la FSTT"""
     
@@ -136,10 +140,10 @@ class ImportManager:
             filiere = self.db.get_filiere_by_nom(filiere_nom)
             
             if not filiere:
-                # Auto-créer la filière avec niveau par défaut "L3"
-                filiere_id = self.db.ajouter_filiere(filiere_nom, "L3")
+                # Auto-créer la filière avec le niveau par défaut
+                filiere_id = self.db.ajouter_filiere(filiere_nom, DEFAULT_FILIERE_NIVEAU)
                 if filiere_id:
-                    print(f"✅ Filière créée automatiquement : '{filiere_nom}'")
+                    print(f"✅ Filière créée automatiquement : '{filiere_nom}' (Niveau: {DEFAULT_FILIERE_NIVEAU})")
                     filieres_creees += 1
                 else:
                     print(f"⚠️ Impossible de créer la filière '{filiere_nom}' pour le groupe '{ligne['nom']}'")
