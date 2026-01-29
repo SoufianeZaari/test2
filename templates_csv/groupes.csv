@@ -1,26 +1,40 @@
 nom,effectif,filiere
-Groupe Principal,45,Génie Civil
-Gr_01,23,Génie Civil
-Gr_02,22,Génie Civil
-Groupe Principal,40,Énergies Renouvelables
-Gr_01,20,Énergies Renouvelables
-Gr_02,20,Énergies Renouvelables
-Groupe Principal,50,Analytique des Données
-Gr_01,25,Analytique des Données
-Gr_02,25,Analytique des Données
-Groupe Principal,55,Ingénierie de Développement d'Applications Informatiques
-Gr_01,28,Ingénierie de Développement d'Applications Informatiques
-Gr_02,27,Ingénierie de Développement d'Applications Informatiques
-Groupe Principal,35,Statistique et Science des Données
-Gr_01,18,Statistique et Science des Données
-Gr_02,17,Statistique et Science des Données
-Groupe Principal,30,Mathématiques et Informatique Décisionnelles
-Groupe Principal,40,Biotechnologies
-Gr_01,20,Biotechnologies
-Gr_02,20,Biotechnologies
-Groupe Principal,35,Génie des Procédés
-Groupe Principal,30,Techniques d'Analyses Chimiques
-Groupe Principal,25,Risques et Ressources Naturels
-Groupe Principal,40,Génie Électrique & Système Industriel
-Groupe Principal,38,Génie Industriel
-Groupe Principal,32,Design Industriel et Productique
+GP_GCI,50,Génie Civil
+Gr_GCI_1,25,Génie Civil
+Gr_GCI_2,25,Génie Civil
+GP_ENR,50,Énergies Renouvelables
+Gr_ENR_1,25,Énergies Renouvelables
+Gr_ENR_2,25,Énergies Renouvelables
+GP_ADO,50,Analytique des Données
+Gr_ADO_1,25,Analytique des Données
+Gr_ADO_2,25,Analytique des Données
+GP_IDAI,50,Ingénierie de Développement d'Applications Informatiques
+Gr_IDAI_1,25,Ingénierie de Développement d'Applications Informatiques
+Gr_IDAI_2,25,Ingénierie de Développement d'Applications Informatiques
+GP_SSD,50,Statistique et Science des Données
+Gr_SSD_1,25,Statistique et Science des Données
+Gr_SSD_2,25,Statistique et Science des Données
+GP_MID,50,Mathématiques et Informatique Décisionnelles
+Gr_MID_1,25,Mathématiques et Informatique Décisionnelles
+Gr_MID_2,25,Mathématiques et Informatique Décisionnelles
+GP_BIO,50,Biotechnologies
+Gr_BIO_1,25,Biotechnologies
+Gr_BIO_2,25,Biotechnologies
+GP_GDP,50,Génie des Procédés
+Gr_GDP_1,25,Génie des Procédés
+Gr_GDP_2,25,Génie des Procédés
+GP_TAC,50,Techniques d'Analyses Chimiques
+Gr_TAC_1,25,Techniques d'Analyses Chimiques
+Gr_TAC_2,25,Techniques d'Analyses Chimiques
+GP_RRN,50,Risques et Ressources Naturels
+Gr_RRN_1,25,Risques et Ressources Naturels
+Gr_RRN_2,25,Risques et Ressources Naturels
+GP_GESI,50,Génie Électrique & Système Industriel
+Gr_GESI_1,25,Génie Électrique & Système Industriel
+Gr_GESI_2,25,Génie Électrique & Système Industriel
+GP_GIN,50,Génie Industriel
+Gr_GIN_1,25,Génie Industriel
+Gr_GIN_2,25,Génie Industriel
+GP_DIP,50,Design Industriel et Productique
+Gr_DIP_1,25,Design Industriel et Productique
+Gr_DIP_2,25,Design Industriel et Productique

@@ -1,16 +1,61 @@
 nom,prenom,email,specialite,duree_max_jour
-ALAMI,Mohammed,m.alami@uae.ac.ma,Génie Civil,420
-BENNIS,Fatima,f.bennis@uae.ac.ma,Énergies Renouvelables,480
-TAZI,Ahmed,a.tazi@uae.ac.ma,Informatique,360
-IDRISSI,Sara,s.idrissi@uae.ac.ma,Mathématiques,450
-KETTANI,Karim,k.kettani@uae.ac.ma,Biotechnologie,480
-AMRANI,Youssef,y.amrani@uae.ac.ma,Chimie,420
-CHRAIBI,Laila,l.chraibi@uae.ac.ma,Physique,480
-FASSI,Omar,o.fassi@uae.ac.ma,Génie Électrique,390
-BENJELLOUN,Nadia,n.benjelloun@uae.ac.ma,Statistique,450
-SEFRIOUI,Hassan,h.sefrioui@uae.ac.ma,Génie Industriel,480
-BADRI,Meryem,m.badri@uae.ac.ma,Biologie,420
-ZAHRAOUI,Rachid,r.zahraoui@uae.ac.ma,Génie des Procédés,450
-CHERKAOUI,Samira,s.cherkaoui@uae.ac.ma,Informatique,360
-MANSOURI,Khalid,k.mansouri@uae.ac.ma,Mathématiques Appliquées,420
-TOUNSI,Imane,i.tounsi@uae.ac.ma,Génie Mécanique,480
+Alami,Mohammed,mohammed.alami1@uae.ac.ma,Informatique,420
+Bennani,Mohammed,mohammed.bennani2@uae.ac.ma,Mathématiques,450
+Tazi,Mohammed,mohammed.tazi3@uae.ac.ma,Physique,480
+Idrissi,Mohammed,mohammed.idrissi4@uae.ac.ma,Chimie,510
+Kettani,Mohammed,mohammed.kettani5@uae.ac.ma,Biologie,420
+Amrani,Mohammed,mohammed.amrani6@uae.ac.ma,Génie Civil,450
+Chraibi,Mohammed,mohammed.chraibi7@uae.ac.ma,Génie Électrique,480
+Fassi,Mohammed,mohammed.fassi8@uae.ac.ma,Génie Mécanique,510
+Benjelloun,Mohammed,mohammed.benjelloun9@uae.ac.ma,Génie Industriel,420
+Sefrioui,Mohammed,mohammed.sefrioui10@uae.ac.ma,Statistique,450
+Badri,Mohammed,mohammed.badri11@uae.ac.ma,Économie,480
+Zahraoui,Mohammed,mohammed.zahraoui12@uae.ac.ma,Gestion,510
+Cherkaoui,Mohammed,mohammed.cherkaoui13@uae.ac.ma,Langues,420
+Mansouri,Mohammed,mohammed.mansouri14@uae.ac.ma,Sciences de l'Environnement,450
+Tounsi,Mohammed,mohammed.tounsi15@uae.ac.ma,Énergies Renouvelables,480
+Hajji,Mohammed,mohammed.hajji16@uae.ac.ma,Biotechnologie,510
+Lahlou,Mohammed,mohammed.lahlou17@uae.ac.ma,Informatique,420
+Bouzidi,Mohammed,mohammed.bouzidi18@uae.ac.ma,Mathématiques,450
+Haddaoui,Mohammed,mohammed.haddaoui19@uae.ac.ma,Physique,480
+Naji,Mohammed,mohammed.naji20@uae.ac.ma,Chimie,510
+Moussaoui,Mohammed,mohammed.moussaoui21@uae.ac.ma,Biologie,420
+Berrada,Mohammed,mohammed.berrada22@uae.ac.ma,Génie Civil,450
+Filali,Mohammed,mohammed.filali23@uae.ac.ma,Génie Électrique,480
+Kadiri,Mohammed,mohammed.kadiri24@uae.ac.ma,Génie Mécanique,510
+Ouazzani,Mohammed,mohammed.ouazzani25@uae.ac.ma,Génie Industriel,420
+Senhaji,Mohammed,mohammed.senhaji26@uae.ac.ma,Statistique,450
+Benkirane,Mohammed,mohammed.benkirane27@uae.ac.ma,Économie,480
+Tahiri,Mohammed,mohammed.tahiri28@uae.ac.ma,Gestion,510
+Kabbaj,Mohammed,mohammed.kabbaj29@uae.ac.ma,Langues,420
+Bennai,Mohammed,mohammed.bennai30@uae.ac.ma,Sciences de l'Environnement,450
+Alami,Fatima,fatima.alami31@uae.ac.ma,Énergies Renouvelables,480
+Bennani,Fatima,fatima.bennani32@uae.ac.ma,Biotechnologie,510
+Tazi,Fatima,fatima.tazi33@uae.ac.ma,Informatique,420
+Idrissi,Fatima,fatima.idrissi34@uae.ac.ma,Mathématiques,450
+Kettani,Fatima,fatima.kettani35@uae.ac.ma,Physique,480
+Amrani,Fatima,fatima.amrani36@uae.ac.ma,Chimie,510
+Chraibi,Fatima,fatima.chraibi37@uae.ac.ma,Biologie,420
+Fassi,Fatima,fatima.fassi38@uae.ac.ma,Génie Civil,450
+Benjelloun,Fatima,fatima.benjelloun39@uae.ac.ma,Génie Électrique,480
+Sefrioui,Fatima,fatima.sefrioui40@uae.ac.ma,Génie Mécanique,510
+Badri,Fatima,fatima.badri41@uae.ac.ma,Génie Industriel,420
+Zahraoui,Fatima,fatima.zahraoui42@uae.ac.ma,Statistique,450
+Cherkaoui,Fatima,fatima.cherkaoui43@uae.ac.ma,Économie,480
+Mansouri,Fatima,fatima.mansouri44@uae.ac.ma,Gestion,510
+Tounsi,Fatima,fatima.tounsi45@uae.ac.ma,Langues,420
+Hajji,Fatima,fatima.hajji46@uae.ac.ma,Sciences de l'Environnement,450
+Lahlou,Fatima,fatima.lahlou47@uae.ac.ma,Énergies Renouvelables,480
+Bouzidi,Fatima,fatima.bouzidi48@uae.ac.ma,Biotechnologie,510
+Haddaoui,Fatima,fatima.haddaoui49@uae.ac.ma,Informatique,420
+Naji,Fatima,fatima.naji50@uae.ac.ma,Mathématiques,450
+Moussaoui,Fatima,fatima.moussaoui51@uae.ac.ma,Physique,480
+Berrada,Fatima,fatima.berrada52@uae.ac.ma,Chimie,510
+Filali,Fatima,fatima.filali53@uae.ac.ma,Biologie,420
+Kadiri,Fatima,fatima.kadiri54@uae.ac.ma,Génie Civil,450
+Ouazzani,Fatima,fatima.ouazzani55@uae.ac.ma,Génie Électrique,480
+Senhaji,Fatima,fatima.senhaji56@uae.ac.ma,Génie Mécanique,510
+Benkirane,Fatima,fatima.benkirane57@uae.ac.ma,Génie Industriel,420
+Tahiri,Fatima,fatima.tahiri58@uae.ac.ma,Statistique,450
+Kabbaj,Fatima,fatima.kabbaj59@uae.ac.ma,Économie,480
+Bennai,Fatima,fatima.bennai60@uae.ac.ma,Gestion,510
