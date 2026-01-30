@@ -493,7 +493,7 @@ class AdminWindow(QWidget):
         layout = QVBoxLayout(page)
         layout.setSpacing(20)
         
-        # Header avec compteur
+        # Header avec compteur et bouton actualiser
         header_layout = QHBoxLayout()
         title = QLabel("Demandes de Réservation")
         title.setStyleSheet(CARD_TITLE_STYLE)
@@ -501,15 +501,22 @@ class AdminWindow(QWidget):
         self.counter_label = QLabel("0 demandes en attente")
         self.counter_label.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 14px; font-weight: bold;")
         
+        btn_refresh = QPushButton("Actualiser")
+        btn_refresh.setStyleSheet(SECONDARY_BUTTON_STYLE)
+        btn_refresh.clicked.connect(self.refresh_reservations)
+        
         header_layout.addWidget(title)
         header_layout.addStretch()
         header_layout.addWidget(self.counter_label)
+        header_layout.addWidget(btn_refresh)
         layout.addLayout(header_layout)
         
-        # Table des réservations
+        # Table des réservations - colonnes améliorées
         self.res_table = QTableWidget()
-        self.res_table.setColumnCount(5)
-        self.res_table.setHorizontalHeaderLabels(["Date", "Enseignant", "Salle", "Motif", "Actions"])
+        self.res_table.setColumnCount(7)
+        self.res_table.setHorizontalHeaderLabels([
+            "Date", "Horaire", "Enseignant", "Email", "Salle", "Motif/Type", "Actions"
+        ])
         self.res_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.res_table.setStyleSheet(TABLE_STYLE)
         
@@ -521,13 +528,90 @@ class AdminWindow(QWidget):
         return page
 
     def refresh_reservations(self):
-        """Affiche les réservations et met à jour le compteur"""
+        """Affiche les réservations depuis la base de données"""
         self.res_table.setRowCount(0)
         
-        # Compter seulement les demandes en attente (celles qui n'ont pas de clé 'status')
+        try:
+            # Charger les réservations depuis la BDD
+            reservations = self.db.get_reservations_by_statut('en_attente')
+            
+            pending_count = len(reservations)
+            
+            # Mise à jour compteur
+            self.counter_label.setText(f"{pending_count} demande{'s' if pending_count > 1 else ''} en attente")
+            if pending_count == 0:
+                self.counter_label.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 14px;")
+            else:
+                self.counter_label.setStyleSheet(f"color: {COLORS['error']}; font-size: 14px; font-weight: bold;")
+            
+            for i, res in enumerate(reservations):
+                # res: (id, enseignant_id, salle_id, date, heure_debut, heure_fin, statut, motif, date_demande)
+                self.res_table.insertRow(i)
+                
+                res_id = res[0]
+                enseignant_id = res[1]
+                salle_id = res[2]
+                date = res[3]
+                heure_debut = res[4]
+                heure_fin = res[5]
+                statut = res[6]
+                motif = res[7] or ""
+                
+                # Récupérer infos enseignant
+                enseignant = self.db.get_utilisateur_by_id(enseignant_id)
+                prof_nom = f"{enseignant[2]} {enseignant[1]}" if enseignant else "Inconnu"
+                prof_email = enseignant[3] if enseignant else ""
+                
+                # Récupérer infos salle
+                salle = self.db.get_salle_by_id(salle_id)
+                salle_nom = salle[1] if salle else "Inconnue"
+                
+                # Remplir les colonnes
+                self.res_table.setItem(i, 0, QTableWidgetItem(date))
+                self.res_table.setItem(i, 1, QTableWidgetItem(f"{heure_debut} - {heure_fin}"))
+                self.res_table.setItem(i, 2, QTableWidgetItem(prof_nom))
+                self.res_table.setItem(i, 3, QTableWidgetItem(prof_email))
+                self.res_table.setItem(i, 4, QTableWidgetItem(salle_nom))
+                self.res_table.setItem(i, 5, QTableWidgetItem(motif))
+                
+                # Actions Widget
+                actions_widget = QWidget()
+                actions_layout = QHBoxLayout(actions_widget)
+                actions_layout.setContentsMargins(2, 2, 2, 2)
+                actions_layout.setSpacing(10)
+                actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                btn_accept = QPushButton("Accepter")
+                btn_accept.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_accept.setStyleSheet("""
+                    QPushButton { background-color: #27ae60; color: white; border-radius: 4px; padding: 6px 12px; border:none; font-weight:bold;}
+                    QPushButton:hover { background-color: #219150; }
+                """)
+                btn_accept.clicked.connect(lambda _, rid=res_id: self.handle_reservation_db(rid, True))
+                
+                btn_refuse = QPushButton("Refuser")
+                btn_refuse.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_refuse.setStyleSheet("""
+                    QPushButton { background-color: #c0392b; color: white; border-radius: 4px; padding: 6px 12px; border:none; font-weight:bold;}
+                    QPushButton:hover { background-color: #a93226; }
+                """)
+                btn_refuse.clicked.connect(lambda _, rid=res_id: self.handle_reservation_db(rid, False))
+                
+                actions_layout.addWidget(btn_accept)
+                actions_layout.addWidget(btn_refuse)
+                
+                self.res_table.setCellWidget(i, 6, actions_widget)
+                self.res_table.setRowHeight(i, 60)
+                
+        except Exception as e:
+            print(f"Erreur chargement réservations: {e}")
+            # Fallback to mock data
+            self._refresh_reservations_mock()
+
+    def _refresh_reservations_mock(self):
+        """Fallback avec données fictives si la BDD n'est pas accessible"""
         pending_count = sum(1 for r in self.reservations_data if 'status' not in r)
         
-        # Mise à jour compteur
         self.counter_label.setText(f"{pending_count} demande{'s' if pending_count > 1 else ''} en attente")
         if pending_count == 0:
             self.counter_label.setStyleSheet(f"color: {COLORS['text_light']}; font-size: 14px;")
@@ -536,33 +620,26 @@ class AdminWindow(QWidget):
             
         for i, row_data in enumerate(self.reservations_data):
             self.res_table.insertRow(i)
-            # Date, Prof, Salle, Motif
             self.res_table.setItem(i, 0, QTableWidgetItem(row_data['date']))
-            self.res_table.setItem(i, 1, QTableWidgetItem(row_data['prof']))
-            self.res_table.setItem(i, 2, QTableWidgetItem(row_data['salle']))
-            self.res_table.setItem(i, 3, QTableWidgetItem(row_data['motif']))
+            self.res_table.setItem(i, 1, QTableWidgetItem("08:30 - 10:00"))
+            self.res_table.setItem(i, 2, QTableWidgetItem(row_data['prof']))
+            self.res_table.setItem(i, 3, QTableWidgetItem(""))
+            self.res_table.setItem(i, 4, QTableWidgetItem(row_data['salle']))
+            self.res_table.setItem(i, 5, QTableWidgetItem(row_data['motif']))
             
-            # Actions Widget
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
             actions_layout.setContentsMargins(2, 2, 2, 2)
             actions_layout.setSpacing(10)
             actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            # Si la demande a déjà un statut, on l'affiche
             if 'status' in row_data:
                 status = row_data['status']
                 lbl_status = QLabel(status)
-                
-                if status == "Acceptée":
-                    lbl_status.setStyleSheet(f"color: white; background-color: #27ae60; padding: 5px 10px; border-radius: 4px; font-weight: bold;")
-                else:
-                    lbl_status.setStyleSheet(f"color: white; background-color: #c0392b; padding: 5px 10px; border-radius: 4px; font-weight: bold;")
-                
+                color = "#27ae60" if status == "Acceptée" else "#c0392b"
+                lbl_status.setStyleSheet(f"color: white; background-color: {color}; padding: 5px 10px; border-radius: 4px; font-weight: bold;")
                 actions_layout.addWidget(lbl_status)
-                
             else:
-                # Sinon on affiche les boutons d'action
                 btn_accept = QPushButton("Accepter")
                 btn_accept.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn_accept.setStyleSheet("""
@@ -582,18 +659,29 @@ class AdminWindow(QWidget):
                 actions_layout.addWidget(btn_accept)
                 actions_layout.addWidget(btn_refuse)
             
-            self.res_table.setCellWidget(i, 4, actions_widget)
+            self.res_table.setCellWidget(i, 6, actions_widget)
             self.res_table.setRowHeight(i, 60)
 
-    def handle_reservation(self, index, accepted):
-        if 0 <= index < len(self.reservations_data):
-            # Mettre à jour le statut au lieu de supprimer
-            data = self.reservations_data[index]
-            data['status'] = "Acceptée" if accepted else "Refusée"
-            print(f"Demande {data['status']} pour {data['prof']}")
+    def handle_reservation_db(self, reservation_id, accepted):
+        """Traite une réservation depuis la base de données"""
+        try:
+            new_status = "validee" if accepted else "rejetee"
+            self.db.modifier_statut_reservation(reservation_id, new_status)
+            
+            status_text = "acceptée" if accepted else "refusée"
+            QMessageBox.information(self, "Succès", f"✅ Demande {status_text} avec succès!")
             
             # Rafraîchir UI
             self.refresh_reservations()
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"❌ Erreur: {e}")
+
+    def handle_reservation(self, index, accepted):
+        if 0 <= index < len(self.reservations_data):
+            data = self.reservations_data[index]
+            data['status'] = "Acceptée" if accepted else "Refusée"
+            print(f"Demande {data['status']} pour {data['prof']}")
+            self._refresh_reservations_mock()
 
     def simulate_new_request(self):
         """Ajoute une demande fictive pour tester"""

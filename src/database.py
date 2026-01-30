@@ -773,3 +773,94 @@ class Database:
         conn.close()
         
         return True
+
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES SUPPLÉMENTAIRES
+    # ═══════════════════════════════════════════════════════════
+
+    def get_toutes_seances(self):
+        """Récupère toutes les séances"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM seances ORDER BY date, heure_debut')
+        seances = cursor.fetchall()
+        
+        conn.close()
+        return seances
+
+    def get_toutes_reservations(self):
+        """Récupère toutes les réservations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM reservations ORDER BY date_demande DESC')
+        reservations = cursor.fetchall()
+        
+        conn.close()
+        return reservations
+
+    def get_salle_by_id(self, salle_id):
+        """Récupère une salle par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM salles WHERE id = ?', (salle_id,))
+        salle = cursor.fetchone()
+        
+        conn.close()
+        return salle
+
+    def get_groupe_by_id(self, groupe_id):
+        """Récupère un groupe par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM groupes WHERE id = ?', (groupe_id,))
+        groupe = cursor.fetchone()
+        
+        conn.close()
+        return groupe
+
+    def valider_specialite_enseignant(self, enseignant_id, matiere):
+        """
+        Vérifie si un enseignant peut enseigner une matière
+        basé sur sa spécialité et les mots-clés de la matière
+        """
+        from config import SPECIALITE_KEYWORDS
+        
+        # Récupérer la spécialité de l'enseignant
+        enseignant = self.get_utilisateur_by_id(enseignant_id)
+        if not enseignant:
+            return False, "Enseignant introuvable"
+        
+        specialite = enseignant[6]  # Index 6 = specialite
+        if not specialite:
+            return True, "Pas de spécialité définie"  # Permettre si pas de spécialité
+        
+        # Normaliser le nom de la matière
+        matiere_lower = matiere.lower()
+        specialite_lower = specialite.lower()
+        
+        # Vérifier les mots-clés pour la spécialité
+        for spec, keywords in SPECIALITE_KEYWORDS.items():
+            spec_lower = spec.lower()
+            if specialite_lower in spec_lower or spec_lower in specialite_lower:
+                # Vérifier si la matière contient un mot-clé de cette spécialité
+                for keyword in keywords:
+                    if keyword.lower() in matiere_lower:
+                        return True, f"Correspondance trouvée: {spec}"
+        
+        # Vérifier si la spécialité est directement dans le nom de la matière
+        if specialite_lower in matiere_lower or matiere_lower in specialite_lower:
+            return True, "Correspondance directe"
+        
+        # Si aucune correspondance, vérifier les mots-clés génériques
+        # (langues, management peuvent être enseignés par plusieurs spécialités)
+        matieres_generiques = ['anglais', 'français', 'langue', 'communication', 
+                               'management', 'projet', 'skill', 'stage']
+        for gen in matieres_generiques:
+            if gen in matiere_lower:
+                return True, "Matière générique"
+        
+        return False, f"La matière '{matiere}' ne correspond pas à la spécialité '{specialite}'"
