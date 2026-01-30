@@ -153,8 +153,8 @@ class EtudiantWindow(QWidget):
         
         # Info Étudiant
         info_str = f"""
-        <div style='font-size: 16px; color: {COLORS['text_dark']};'>
-            <b>Étudiant:</b> {self.user.nom} {self.user.prenom} | 
+        <div style='font-size: 14px; color: {COLORS['text_dark']};'>
+            <b>Étudiant:</b> {self.user.prenom} {self.user.nom}<br/>
             <b>Email:</b> {self.user.email}
         </div>
         """
@@ -163,11 +163,11 @@ class EtudiantWindow(QWidget):
         h_layout.addWidget(info_label)
         h_layout.addStretch()
         
-        # Actions (Imprimer)
+        # Actions (Exporter)
         for fmt in ["PDF", "Excel", "Image"]:
-            btn = QPushButton(f"Imprimer {fmt}")
+            btn = QPushButton(f"Exporter {fmt}")
             btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
-            btn.clicked.connect(lambda _, f=fmt: QMessageBox.information(self, "Export", f"Export {f} lancé..."))
+            btn.clicked.connect(lambda _, f=fmt: self.export_schedule(f))
             h_layout.addWidget(btn)
             
         layout.addWidget(header_frame)
@@ -190,20 +190,20 @@ class EtudiantWindow(QWidget):
     def load_schedule(self):
         self.schedule_table.clearContents()
         try:
-             if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
-                 conn = self.db.get_connection()
-                 cursor = conn.cursor()
-                 cursor.execute('''
-                    SELECT s.date, s.heure_debut, s.titre, s.type_seance, sa.nom, u.nom
+            if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
+                conn = self.db.get_connection()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT s.date, s.heure_debut, s.titre, s.type_seance, sa.nom, u.nom, u.prenom
                     FROM seances s
                     LEFT JOIN salles sa ON s.salle_id = sa.id
                     LEFT JOIN utilisateurs u ON s.enseignant_id = u.id
                     WHERE s.groupe_id = ?
-                 ''', (self.user.groupe_id,))
-                 seances = cursor.fetchall()
-                 conn.close()
-                 
-                 def get_row(time_str):
+                ''', (self.user.groupe_id,))
+                seances = cursor.fetchall()
+                conn.close()
+                
+                def get_row(time_str):
                     if "08" in time_str or "09" in time_str: return 0
                     if "10" in time_str or "11" in time_str: return 1
                     if "12" in time_str or "13" in time_str: return 2
@@ -211,7 +211,8 @@ class EtudiantWindow(QWidget):
                     if "16" in time_str or "17" in time_str: return 4
                     return -1
 
-                 for s in seances:
+                for s in seances:
+                    # s: (date, heure_debut, titre, type_seance, salle_nom, enseignant_nom, enseignant_prenom)
                     date_str = s[0]
                     qdate = QDate.fromString(date_str, "yyyy-MM-dd")
                     day_idx = qdate.dayOfWeek() - 1 
@@ -219,17 +220,103 @@ class EtudiantWindow(QWidget):
                     if 0 <= day_idx <= 5:
                         row = get_row(s[1])
                         if row != -1:
-                            txt = f"{s[2]}\n{s[4] if s[4] else '?'}"
-                            color = COLORS['primary_blue'] if s[3] == 'Cours' else COLORS['secondary_blue']
-                            self.set_course(self.schedule_table, row, day_idx, s[2], s[4] if s[4] else "?", color)
+                            titre = s[2] if s[2] else "?"
+                            type_seance = s[3] if s[3] else "?"
+                            salle = s[4] if s[4] else "?"
+                            enseignant = f"{s[6]} {s[5]}" if s[5] and s[6] else "?"
+                            
+                            self.set_course_detailed(
+                                self.schedule_table, row, day_idx, 
+                                titre, type_seance, salle, enseignant
+                            )
         except Exception as e:
             print(f"Student schedule error: {e}")
 
-    def set_course(self, table, row, col, subject, room, color):
-        item = QLabel(f"{subject}\n{room}")
+    def set_course_detailed(self, table, row, col, subject, seance_type, room, teacher):
+        """Affiche une séance avec tous les détails"""
+        # Couleur selon le type
+        color_map = {
+            'Cours': COLORS['primary_blue'],
+            'TD': '#27ae60',  # Vert
+            'TP': '#e67e22',  # Orange
+            'Examen': '#c0392b',  # Rouge
+        }
+        color = color_map.get(seance_type, COLORS['secondary_blue'])
+        
+        content = f"""
+        <div style='text-align: center; padding: 4px;'>
+            <b>{subject}</b><br/>
+            <span style='font-size: 11px; background-color: rgba(255,255,255,0.2); padding: 2px 5px; border-radius: 3px;'>{seance_type}</span><br/>
+            <span style='font-size: 10px;'>📍 {room}</span><br/>
+            <span style='font-size: 10px;'>👨‍🏫 {teacher}</span>
+        </div>
+        """
+        
+        item = QLabel(content)
+        item.setTextFormat(Qt.TextFormat.RichText)
         item.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        item.setStyleSheet(f"background-color: {color}; color: white; border-radius: 5px; margin: 2px; font-weight: bold;")
+        item.setStyleSheet(f"""
+            background-color: {color}; 
+            color: white; 
+            border-radius: 8px; 
+            margin: 2px; 
+            padding: 5px;
+        """)
         table.setCellWidget(row, col, item)
+
+    def export_schedule(self, format_type):
+        """Exporte l'emploi du temps dans le format demandé"""
+        try:
+            from datetime import datetime
+            
+            exports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'exports')
+            os.makedirs(exports_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"emploi_du_temps_etudiant_{self.user.nom}_{timestamp}"
+            
+            if format_type.lower() == "image":
+                # Capturer le widget de la table
+                filepath = os.path.join(exports_dir, f"{filename}.png")
+                pixmap = self.schedule_table.grab()
+                pixmap.save(filepath, "PNG")
+                QMessageBox.information(self, "Export Réussi", f"✅ Image exportée:\n{filepath}")
+            else:
+                # CSV fallback pour PDF et Excel
+                import csv
+                filepath = os.path.join(exports_dir, f"{filename}.csv")
+                
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([f"Emploi du Temps - {self.user.prenom} {self.user.nom}"])
+                    writer.writerow([])
+                    writer.writerow(["Date", "Horaire", "Matière", "Type", "Salle", "Enseignant"])
+                    
+                    if hasattr(self.user, 'groupe_id') and self.user.groupe_id:
+                        conn = self.db.get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            SELECT s.date, s.heure_debut, s.heure_fin, s.titre, s.type_seance, sa.nom, u.nom, u.prenom
+                            FROM seances s
+                            LEFT JOIN salles sa ON s.salle_id = sa.id
+                            LEFT JOIN utilisateurs u ON s.enseignant_id = u.id
+                            WHERE s.groupe_id = ?
+                            ORDER BY s.date, s.heure_debut
+                        ''', (self.user.groupe_id,))
+                        seances = cursor.fetchall()
+                        conn.close()
+                        
+                        for s in seances:
+                            writer.writerow([
+                                s[0], f"{s[1]}-{s[2]}", s[3], s[4],
+                                s[5] if s[5] else 'N/A',
+                                f"{s[7]} {s[6]}" if s[6] and s[7] else 'N/A'
+                            ])
+                
+                QMessageBox.information(self, "Export Réussi", f"✅ Fichier exporté:\n{filepath}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"❌ Erreur lors de l'export: {e}")
 
     def create_search_page(self):
         page = QWidget()

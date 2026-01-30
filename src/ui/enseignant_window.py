@@ -4,6 +4,10 @@ Fenêtre principale de l'enseignant
 Fonctionnalités : Emploi du temps, Réservations, Recherche Salles, Indisponibilités
 """
 
+import os
+import csv
+from datetime import datetime
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QFrame, QStackedWidget, QTableWidget, 
@@ -14,6 +18,7 @@ from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QColor
 
 from configUI import WINDOW_CONFIG, COLORS, FST_LOGO_IMAGE
+from config import MATIERES_COMPLETES, SPECIALITE_KEYWORDS
 from src.ui.styles import (
     GLOBAL_STYLE, SIDEBAR_STYLE, SIDEBAR_BUTTON_STYLE, 
     SIDEBAR_USER_INFO_STYLE, CARD_STYLE, CARD_TITLE_STYLE,
@@ -27,6 +32,7 @@ class UserWrapper:
         self.nom = user_tuple[1]
         self.prenom = user_tuple[2]
         self.email = user_tuple[3]
+        self.specialite = user_tuple[6] if len(user_tuple) > 6 else None
         # Map other fields if necessary
 
 class EnseignantWindow(QWidget):
@@ -142,23 +148,43 @@ class EnseignantWindow(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         
-        # Actions (Imprimer)
-        actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
+        # Info enseignant
+        info_frame = QFrame()
+        info_frame.setStyleSheet("""
+            background-color: white; 
+            border-radius: 10px; 
+            padding: 15px;
+            border: 1px solid #E0E0E0;
+        """)
+        info_layout = QHBoxLayout(info_frame)
         
+        specialite = getattr(self.user, 'specialite', None) or "Non définie"
+        info_str = f"""
+        <div style='font-size: 14px; color: {COLORS['text_dark']};'>
+            <b>Enseignant:</b> {self.user.prenom} {self.user.nom}<br/>
+            <b>Email:</b> {self.user.email}<br/>
+            <b>Spécialité:</b> {specialite}
+        </div>
+        """
+        info_label = QLabel(info_str)
+        info_label.setTextFormat(Qt.TextFormat.RichText)
+        info_layout.addWidget(info_label)
+        info_layout.addStretch()
+        
+        # Actions (Exporter)
         for fmt in ["PDF", "Excel", "Image"]:
-            btn = QPushButton(f"Imprimer {fmt}")
+            btn = QPushButton(f"Exporter {fmt}")
             btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
-            btn.clicked.connect(lambda _, f=fmt: QMessageBox.information(self, "Export", f"Export {f} lancé..."))
-            actions_layout.addWidget(btn)
+            btn.clicked.connect(lambda _, f=fmt: self.export_schedule(f))
+            info_layout.addWidget(btn)
             
-        layout.addLayout(actions_layout)
+        layout.addWidget(info_frame)
         
         # Table
         self.schedule_table = QTableWidget(5, 6)
         self.schedule_table.setHorizontalHeaderLabels(["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"])
         time_slots = ["08:30 - 10:00", "10:15 - 11:45", "12:00 - 13:30", "13:45 - 15:15", "15:30 - 17:00"]
-        self.schedule_table.setVerticalHeaderLabels(time_slots) # Using standard slots roughly
+        self.schedule_table.setVerticalHeaderLabels(time_slots)
         self.schedule_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.schedule_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.schedule_table.setStyleSheet(TABLE_STYLE)
@@ -170,12 +196,9 @@ class EnseignantWindow(QWidget):
         return page
 
     def load_schedule(self):
-        """Charge l'emploi du temps de l'enseignant"""
+        """Charge l'emploi du temps de l'enseignant avec détails complets"""
         self.schedule_table.clearContents()
         
-        # Mapping jours/heures
-        days_map = {'Lundi': 0, 'Mardi': 1, 'Mercredi': 2, 'Jeudi': 3, 'Vendredi': 4, 'Samedi': 5}
-        # Time mapping (Simplified)
         def get_row(time_str):
             if "08" in time_str or "09" in time_str: return 0
             if "10" in time_str or "11" in time_str: return 1
@@ -185,115 +208,461 @@ class EnseignantWindow(QWidget):
             return -1
 
         try:
-            # Assuming get_seances_by_enseignant exists in DB
             seances = self.db.get_seances_by_enseignant(self.user.id)
+            
             for s in seances:
-                # s: id, titre, type, date, h_debut, h_fin, salle_id...
-                # We need day of week from date
+                # s: id(0), titre(1), type_seance(2), date(3), h_debut(4), h_fin(5), salle_id(6), enseignant_id(7), groupe_id(8)
                 date_str = s[3]
                 qdate = QDate.fromString(date_str, "yyyy-MM-dd")
-                day_idx = qdate.dayOfWeek() - 1 # 1=Mon, 7=Sun
+                day_idx = qdate.dayOfWeek() - 1
                 
                 if 0 <= day_idx <= 5:
-                    row = get_row(s[4]) # h_debut
+                    row = get_row(s[4])
                     if row != -1:
-                        # Fetch Room Name
+                        # Récupérer le nom de la salle
                         salle_name = "Salle ?"
-                        if s[6]: # salle_id
-                            # Need to fetch salle name. ideally JOIN in get_seances_by_enseignant
-                            # Hack: do query or cache.
-                            pass
+                        if s[6]:
+                            salle = self.db.get_salle_by_id(s[6])
+                            if salle:
+                                salle_name = salle[1]
                         
-                        txt = f"{s[1]}\n{s[2]}"
-                        self.set_course(self.schedule_table, row, day_idx, s[1], s[2], COLORS['primary_blue'])
+                        # Récupérer le nom du groupe
+                        groupe_name = ""
+                        if s[8]:
+                            groupe = self.db.get_groupe_by_id(s[8])
+                            if groupe:
+                                groupe_name = groupe[1]
+                        
+                        # Affichage: Matière, Type, Salle, Groupe
+                        type_seance = s[2] if s[2] else "?"
+                        titre = s[1] if s[1] else "?"
+                        
+                        self.set_course_detailed(
+                            self.schedule_table, row, day_idx, 
+                            titre, type_seance, salle_name, groupe_name
+                        )
                         
         except Exception as e:
             print(f"Schedule load error: {e}")
 
-    def set_course(self, table, row, col, subject, room, color):
-        item = QLabel(f"{subject}\n{room}")
+    def set_course_detailed(self, table, row, col, subject, seance_type, room, group):
+        """Affiche une séance avec tous les détails: matière, type, salle, groupe"""
+        # Couleur selon le type
+        color_map = {
+            'Cours': COLORS['primary_blue'],
+            'TD': '#27ae60',  # Vert
+            'TP': '#e67e22',  # Orange
+            'Examen': '#c0392b',  # Rouge
+        }
+        color = color_map.get(seance_type, COLORS['secondary_blue'])
+        
+        # Widget personnalisé avec tous les détails
+        content = f"""
+        <div style='text-align: center; padding: 4px;'>
+            <b>{subject}</b><br/>
+            <span style='font-size: 11px; color: #ffffff; background-color: rgba(255,255,255,0.2); padding: 2px 5px; border-radius: 3px;'>{seance_type}</span><br/>
+            <span style='font-size: 10px;'>📍 {room}</span><br/>
+            <span style='font-size: 10px;'>👥 {group if group else 'N/A'}</span>
+        </div>
+        """
+        
+        item = QLabel(content)
+        item.setTextFormat(Qt.TextFormat.RichText)
         item.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        item.setStyleSheet(f"background-color: {color}; color: white; border-radius: 5px; margin: 2px; font-weight: bold;")
+        item.setStyleSheet(f"""
+            background-color: {color}; 
+            color: white; 
+            border-radius: 8px; 
+            margin: 2px; 
+            padding: 5px;
+        """)
         table.setCellWidget(row, col, item)
+
+    def export_schedule(self, format_type):
+        """Exporte l'emploi du temps dans le format demandé"""
+        try:
+            # Créer le dossier exports s'il n'existe pas
+            exports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'exports')
+            os.makedirs(exports_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"emploi_du_temps_{self.user.nom}_{timestamp}"
+            
+            if format_type.lower() == "pdf":
+                success, filepath = self._export_to_pdf(exports_dir, filename)
+            elif format_type.lower() == "excel":
+                success, filepath = self._export_to_excel(exports_dir, filename)
+            elif format_type.lower() == "image":
+                success, filepath = self._export_to_image(exports_dir, filename)
+            else:
+                success, filepath = False, None
+            
+            if success:
+                QMessageBox.information(
+                    self, 
+                    "Export Réussi", 
+                    f"✅ Emploi du temps exporté avec succès!\n\nFichier: {filepath}"
+                )
+            else:
+                QMessageBox.warning(self, "Export", f"L'export {format_type} nécessite des dépendances supplémentaires.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"❌ Erreur lors de l'export: {e}")
+
+    def _export_to_pdf(self, exports_dir, filename):
+        """Export vers PDF en utilisant reportlab si disponible, sinon texte"""
+        filepath = os.path.join(exports_dir, f"{filename}.pdf")
+        
+        try:
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.colors import HexColor
+            
+            c = canvas.Canvas(filepath, pagesize=landscape(A4))
+            width, height = landscape(A4)
+            
+            # Titre
+            c.setFont("Helvetica-Bold", 20)
+            c.drawCentredString(width/2, height - 50, f"Emploi du Temps - {self.user.prenom} {self.user.nom}")
+            c.setFont("Helvetica", 12)
+            c.drawCentredString(width/2, height - 70, f"Spécialité: {getattr(self.user, 'specialite', 'N/A')}")
+            
+            # Table headers
+            days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
+            time_slots = ["08:30-10:00", "10:15-11:45", "12:00-13:30", "13:45-15:15", "15:30-17:00"]
+            
+            start_y = height - 100
+            cell_width = (width - 150) / 6
+            cell_height = 80
+            
+            # Draw headers
+            c.setFont("Helvetica-Bold", 10)
+            for i, day in enumerate(days):
+                x = 100 + i * cell_width
+                c.drawString(x + 20, start_y, day)
+            
+            # Draw time slots
+            c.setFont("Helvetica", 9)
+            for i, slot in enumerate(time_slots):
+                y = start_y - 30 - (i * cell_height)
+                c.drawString(10, y, slot)
+            
+            c.save()
+            return True, filepath
+            
+        except ImportError:
+            # Fallback to text file
+            text_path = os.path.join(exports_dir, f"{filename}.txt")
+            with open(text_path, 'w', encoding='utf-8') as f:
+                f.write(f"EMPLOI DU TEMPS - {self.user.prenom} {self.user.nom}\n")
+                f.write(f"Spécialité: {getattr(self.user, 'specialite', 'N/A')}\n")
+                f.write("="*50 + "\n\n")
+                
+                seances = self.db.get_seances_by_enseignant(self.user.id)
+                for s in seances:
+                    salle = self.db.get_salle_by_id(s[6]) if s[6] else None
+                    groupe = self.db.get_groupe_by_id(s[8]) if s[8] else None
+                    f.write(f"Date: {s[3]} | {s[4]}-{s[5]}\n")
+                    f.write(f"  Matière: {s[1]} ({s[2]})\n")
+                    f.write(f"  Salle: {salle[1] if salle else 'N/A'}\n")
+                    f.write(f"  Groupe: {groupe[1] if groupe else 'N/A'}\n\n")
+                    
+            return True, text_path
+
+    def _export_to_excel(self, exports_dir, filename):
+        """Export vers Excel en utilisant openpyxl si disponible, sinon CSV"""
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, Fill, PatternFill, Alignment
+            
+            filepath = os.path.join(exports_dir, f"{filename}.xlsx")
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Emploi du Temps"
+            
+            # Titre
+            ws['A1'] = f"Emploi du Temps - {self.user.prenom} {self.user.nom}"
+            ws['A1'].font = Font(bold=True, size=14)
+            ws['A2'] = f"Spécialité: {getattr(self.user, 'specialite', 'N/A')}"
+            
+            # Headers
+            headers = ["Date", "Horaire", "Matière", "Type", "Salle", "Groupe"]
+            for i, header in enumerate(headers):
+                cell = ws.cell(row=4, column=i+1, value=header)
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="1e3a8a")
+                cell.alignment = Alignment(horizontal='center')
+            
+            # Data rows
+            seances = self.db.get_seances_by_enseignant(self.user.id)
+            for row_num, s in enumerate(seances, start=5):
+                salle = self.db.get_salle_by_id(s[6]) if s[6] else None
+                groupe = self.db.get_groupe_by_id(s[8]) if s[8] else None
+                ws.cell(row=row_num, column=1, value=s[3])
+                ws.cell(row=row_num, column=2, value=f"{s[4]}-{s[5]}")
+                ws.cell(row=row_num, column=3, value=s[1])
+                ws.cell(row=row_num, column=4, value=s[2])
+                ws.cell(row=row_num, column=5, value=salle[1] if salle else 'N/A')
+                ws.cell(row=row_num, column=6, value=groupe[1] if groupe else 'N/A')
+            
+            wb.save(filepath)
+            return True, filepath
+            
+        except ImportError:
+            # Fallback to CSV
+            filepath = os.path.join(exports_dir, f"{filename}.csv")
+            
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([f"Emploi du Temps - {self.user.prenom} {self.user.nom}"])
+                writer.writerow([f"Spécialité: {getattr(self.user, 'specialite', 'N/A')}"])
+                writer.writerow([])
+                writer.writerow(["Date", "Horaire", "Matière", "Type", "Salle", "Groupe"])
+                
+                seances = self.db.get_seances_by_enseignant(self.user.id)
+                for s in seances:
+                    salle = self.db.get_salle_by_id(s[6]) if s[6] else None
+                    groupe = self.db.get_groupe_by_id(s[8]) if s[8] else None
+                    writer.writerow([
+                        s[3], f"{s[4]}-{s[5]}", s[1], s[2],
+                        salle[1] if salle else 'N/A',
+                        groupe[1] if groupe else 'N/A'
+                    ])
+                    
+            return True, filepath
+
+    def _export_to_image(self, exports_dir, filename):
+        """Export vers Image en capturant le widget de la table"""
+        filepath = os.path.join(exports_dir, f"{filename}.png")
+        
+        try:
+            # Capturer le widget de la table
+            pixmap = self.schedule_table.grab()
+            pixmap.save(filepath, "PNG")
+            return True, filepath
+        except Exception as e:
+            print(f"Image export error: {e}")
+            return False, None
 
     def create_reservation_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
         
-        # 2 Options: Choisir ou Créer
+        # Info enseignant avec spécialité
+        info_frame = QFrame()
+        info_frame.setStyleSheet("""
+            background-color: white; 
+            border-radius: 10px; 
+            padding: 15px;
+            border: 1px solid #E0E0E0;
+        """)
+        info_layout = QHBoxLayout(info_frame)
         
-        # Option 1: Choisir Séance
-        opt1_frame = QFrame()
-        opt1_frame.setStyleSheet(CARD_STYLE)
-        opt1_layout = QVBoxLayout(opt1_frame)
-        opt1_layout.addWidget(QLabel("Option A: Pour une séance existante"))
+        specialite = getattr(self.user, 'specialite', None) or "Non définie"
+        info_str = f"""
+        <div style='font-size: 14px; color: {COLORS['text_dark']};'>
+            <b>Enseignant:</b> {self.user.prenom} {self.user.nom}<br/>
+            <b>Email:</b> {self.user.email}<br/>
+            <b>Spécialité:</b> {specialite}
+        </div>
+        """
+        info_label = QLabel(info_str)
+        info_label.setTextFormat(Qt.TextFormat.RichText)
+        info_layout.addWidget(info_label)
+        info_layout.addStretch()
+        layout.addWidget(info_frame)
         
-        cb_layout = QHBoxLayout()
-        cb_layout.addWidget(QLabel("Groupe:"))
-        self.res_group_cb = QComboBox()
-        self.res_group_cb.addItem("G1 - Génie Info")
-        self.res_group_cb.setStyleSheet(INPUT_STYLE)
-        cb_layout.addWidget(self.res_group_cb)
-        
-        cb_layout.addWidget(QLabel("Séance:"))
-        self.res_session_cb = QComboBox()
-        self.res_session_cb.addItem("Lundi 08:30 - Java")
-        self.res_session_cb.setStyleSheet(INPUT_STYLE)
-        cb_layout.addWidget(self.res_session_cb)
-        
-        opt1_layout.addLayout(cb_layout)
-        layout.addWidget(opt1_frame)
-        
-        # Option 2: Créer Séance
+        # Formulaire de réservation
         opt2_frame = QFrame()
         opt2_frame.setStyleSheet(CARD_STYLE)
         opt2_layout = QVBoxLayout(opt2_frame)
-        opt2_layout.addWidget(QLabel("Option B: Créer une nouvelle séance"))
+        
+        title_lbl = QLabel("Nouvelle Demande de Réservation")
+        title_lbl.setStyleSheet(CARD_TITLE_STYLE)
+        opt2_layout.addWidget(title_lbl)
         
         grid = QGridLayout()
+        grid.setSpacing(15)
+        
+        # Date
         grid.addWidget(QLabel("Date:"), 0, 0)
-        self.new_res_date = QDateEdit(QDate.currentDate())
+        self.new_res_date = QDateEdit(QDate.currentDate().addDays(1))
         self.new_res_date.setCalendarPopup(True)
         self.new_res_date.setStyleSheet(INPUT_STYLE)
+        self.new_res_date.setMinimumDate(QDate.currentDate())
         grid.addWidget(self.new_res_date, 0, 1)
         
-        grid.addWidget(QLabel("Heure:"), 0, 2)
-        self.new_res_time = QTimeEdit(QTime(8, 30))
-        self.new_res_time.setStyleSheet(INPUT_STYLE)
-        grid.addWidget(self.new_res_time, 0, 3)
+        # Heure début
+        grid.addWidget(QLabel("Heure Début:"), 0, 2)
+        self.new_res_time_start = QTimeEdit(QTime(8, 30))
+        self.new_res_time_start.setStyleSheet(INPUT_STYLE)
+        grid.addWidget(self.new_res_time_start, 0, 3)
         
+        # Heure fin
+        grid.addWidget(QLabel("Heure Fin:"), 0, 4)
+        self.new_res_time_end = QTimeEdit(QTime(10, 0))
+        self.new_res_time_end.setStyleSheet(INPUT_STYLE)
+        grid.addWidget(self.new_res_time_end, 0, 5)
+        
+        # Matière
         grid.addWidget(QLabel("Matière:"), 1, 0)
         self.new_res_subject = QComboBox()
-        self.new_res_subject.addItems(["Java", "UML", "Anglais"])
+        self.new_res_subject.setEditable(True)
+        self.load_matieres_for_specialite()
         self.new_res_subject.setStyleSheet(INPUT_STYLE)
         grid.addWidget(self.new_res_subject, 1, 1)
         
+        # Type
         grid.addWidget(QLabel("Type:"), 1, 2)
         self.new_res_type = QComboBox()
-        self.new_res_type.addItems(["Cours", "TP", "TD", "Examen", "Rattrapage"])
+        self.new_res_type.addItems(["Cours", "TD", "TP", "Examen", "Rattrapage"])
         self.new_res_type.setStyleSheet(INPUT_STYLE)
         grid.addWidget(self.new_res_type, 1, 3)
-
-        opt2_layout.addLayout(grid)
-        layout.addWidget(opt2_frame)
         
-        # Bouton Action
+        # Salle
+        grid.addWidget(QLabel("Salle:"), 1, 4)
+        self.new_res_salle = QComboBox()
+        self.load_salles()
+        self.new_res_salle.setStyleSheet(INPUT_STYLE)
+        grid.addWidget(self.new_res_salle, 1, 5)
+        
+        # Motif
+        grid.addWidget(QLabel("Motif:"), 2, 0)
+        self.new_res_motif = QTextEdit()
+        self.new_res_motif.setPlaceholderText("Raison de la réservation...")
+        self.new_res_motif.setStyleSheet(INPUT_STYLE)
+        self.new_res_motif.setMaximumHeight(60)
+        grid.addWidget(self.new_res_motif, 2, 1, 1, 5)
+        
+        opt2_layout.addLayout(grid)
+        
+        # Bouton de soumission
         btn_layout = QHBoxLayout()
-        btn_reserve = QPushButton("Rechercher Salle & Réserver")
+        btn_reserve = QPushButton("Soumettre la Demande")
         btn_reserve.setStyleSheet(PRIMARY_BUTTON_STYLE)
-        btn_reserve.clicked.connect(lambda: QMessageBox.information(self, "Réservation", "Demande de réservation simulée (Salle B12 trouvée)."))
+        btn_reserve.clicked.connect(self.submit_reservation)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_reserve)
+        opt2_layout.addLayout(btn_layout)
         
-        layout.addLayout(btn_layout)
+        layout.addWidget(opt2_frame)
         layout.addStretch()
         return page
 
-    # Removed perform_session_search
+    def load_matieres_for_specialite(self):
+        """Charge les matières correspondant à la spécialité de l'enseignant"""
+        self.new_res_subject.clear()
+        specialite = getattr(self.user, 'specialite', None)
+        
+        matieres_set = set()
+        
+        if specialite:
+            specialite_lower = specialite.lower()
+            # Chercher les mots-clés correspondants
+            keywords = []
+            for spec, kw_list in SPECIALITE_KEYWORDS.items():
+                if specialite_lower in spec.lower() or spec.lower() in specialite_lower:
+                    keywords.extend(kw_list)
+            
+            # Chercher les matières correspondantes
+            for prog, matieres in MATIERES_COMPLETES.items():
+                for mat in matieres:
+                    mat_name = mat[1] if isinstance(mat, tuple) else mat
+                    mat_lower = mat_name.lower()
+                    # Vérifier si la matière correspond
+                    for kw in keywords:
+                        if kw.lower() in mat_lower:
+                            matieres_set.add(mat_name)
+                            break
+        
+        # Si pas de correspondance, ajouter quelques matières génériques
+        if not matieres_set:
+            matieres_set = {"Cours Magistral", "Travaux Dirigés", "Travaux Pratiques"}
+        
+        self.new_res_subject.addItems(sorted(matieres_set))
 
+    def load_salles(self):
+        """Charge la liste des salles disponibles"""
+        self.new_res_salle.clear()
+        try:
+            salles = self.db.get_toutes_salles()
+            for s in salles:
+                # s: (id, nom, capacite, type_salle, equipements)
+                self.new_res_salle.addItem(f"{s[1]} ({s[3]}, {s[2]} places)", s[0])
+        except Exception as e:
+            print(f"Erreur chargement salles: {e}")
+            self.new_res_salle.addItem("Aucune salle disponible", -1)
 
-    # Old Search Page Removed
-
+    def submit_reservation(self):
+        """Soumet une demande de réservation avec validation de spécialité"""
+        try:
+            # Récupérer les données
+            date = self.new_res_date.date().toString("yyyy-MM-dd")
+            heure_debut = self.new_res_time_start.time().toString("HH:mm")
+            heure_fin = self.new_res_time_end.time().toString("HH:mm")
+            matiere = self.new_res_subject.currentText().strip()
+            type_seance = self.new_res_type.currentText()
+            salle_id = self.new_res_salle.currentData()
+            motif = self.new_res_motif.toPlainText()
+            
+            # Validation de la matière
+            if not matiere:
+                QMessageBox.warning(self, "Erreur", "Veuillez saisir une matière.")
+                return
+            
+            # Validation de l'heure
+            if self.new_res_time_start.time() >= self.new_res_time_end.time():
+                QMessageBox.warning(self, "Erreur", "L'heure de fin doit être après l'heure de début.")
+                return
+            
+            # Validation de la salle
+            if salle_id is None or salle_id == -1:
+                QMessageBox.warning(self, "Erreur", "Veuillez sélectionner une salle valide.")
+                return
+            
+            # Validation de la spécialité
+            is_valid, msg = self.db.valider_specialite_enseignant(self.user.id, matiere)
+            if not is_valid:
+                QMessageBox.warning(
+                    self, 
+                    "Spécialité Non Correspondante", 
+                    f"⚠️ {msg}\n\nVeuillez choisir une matière correspondant à votre spécialité."
+                )
+                return
+            
+            # Construire le motif complet
+            full_motif = f"{type_seance} - {matiere}"
+            if motif:
+                full_motif += f" | {motif}"
+            
+            # Créer la réservation
+            res_id = self.db.ajouter_reservation(
+                enseignant_id=self.user.id,
+                salle_id=salle_id,
+                date=date,
+                heure_debut=heure_debut,
+                heure_fin=heure_fin,
+                motif=full_motif
+            )
+            
+            if res_id:
+                QMessageBox.information(
+                    self, 
+                    "Succès", 
+                    f"✅ Demande de réservation envoyée avec succès!\n\n"
+                    f"• Date: {date}\n"
+                    f"• Horaire: {heure_debut} - {heure_fin}\n"
+                    f"• Matière: {matiere}\n"
+                    f"• Type: {type_seance}\n\n"
+                    f"Votre demande sera traitée par l'administration."
+                )
+                # Réinitialiser le formulaire
+                self.new_res_motif.clear()
+            else:
+                QMessageBox.critical(self, "Erreur", "❌ Erreur lors de la création de la demande.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"❌ Erreur lors de la soumission: {e}")
 
     def create_unavailability_page(self):
         page = QWidget()
