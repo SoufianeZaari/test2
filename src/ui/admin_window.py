@@ -133,11 +133,9 @@ class AdminWindow(QWidget):
         
         self.setStyleSheet(GLOBAL_STYLE)
         
-        # État des réservations (Simulation)
-        self.reservations_data = [
-            {"date": "2024-02-10", "prof": "M. Alami", "salle": "Amphi B", "motif": "Examen Partiel"},
-            {"date": "2024-02-12", "prof": "Mme. Bennani", "salle": "Salle 12", "motif": "Séance Rattrapage"}
-        ]
+        # État des réservations (Will be loaded from database)
+        self.reservations_data = []
+        self.load_reservations_from_db()
 
         # Layout principal (Horizontal: Sidebar + Contenu)
         self.main_layout = QHBoxLayout(self)
@@ -786,14 +784,203 @@ class AdminWindow(QWidget):
             self.res_table.setRowHeight(i, 60)
 
     def handle_reservation(self, index, accepted):
+        """
+        Handle reservation approval/rejection with admin workflow.
+        - If approved: Confirm session, notify professor AND students
+        - If rejected: Require rejection reason (motif), notify professor only
+        """
         if 0 <= index < len(self.reservations_data):
-            # Mettre à jour le statut au lieu de supprimer
             data = self.reservations_data[index]
-            data['status'] = "Acceptée" if accepted else "Refusée"
-            print(f"Demande {data['status']} pour {data['prof']}")
+            
+            if accepted:
+                # ═══════════════════════════════════════════════════════════
+                # APPROVAL WORKFLOW
+                # ═══════════════════════════════════════════════════════════
+                
+                # Update status in database
+                reservation_id = data.get('db_id')
+                reservation_type = data.get('type', 'reservation')
+                
+                if reservation_type == 'rattrapage' and reservation_id:
+                    # Approve rattrapage (locks the room)
+                    demande = self.db.approuver_demande(reservation_id)
+                    
+                    if demande:
+                        # Send notifications
+                        from src.services_notification import NotificationService
+                        notif_service = NotificationService(self.db)
+                        
+                        # Notify professor
+                        enseignant_id = data.get('enseignant_id')
+                        if enseignant_id:
+                            notif_service.envoyer_notification(
+                                destinataire_id=enseignant_id,
+                                type_notification='info',
+                                titre='Demande Approuvée',
+                                message=f"Votre demande de rattrapage du {data['date']} a été approuvée. "
+                                        f"Salle {data['salle']} confirmée."
+                            )
+                        
+                        # Notify students of the group
+                        groupe_id = data.get('groupe_id')
+                        if groupe_id:
+                            notif_service.notifier_groupe(
+                                groupe_id=groupe_id,
+                                type_notification='info',
+                                titre='Séance de Rattrapage Confirmée',
+                                message=f"Rattrapage {data['motif']} le {data['date']} - "
+                                        f"Salle {data['salle']}"
+                            )
+                        
+                        data['status'] = "Acceptée"
+                        QMessageBox.information(
+                            self, "Succès", 
+                            f"Demande approuvée. Notifications envoyées au professeur et aux étudiants."
+                        )
+                
+                elif reservation_id:
+                    # Approve regular reservation
+                    self.db.modifier_statut_reservation(reservation_id, 'validee')
+                    data['status'] = "Acceptée"
+                    
+                    # Notify professor
+                    from src.services_notification import NotificationService
+                    notif_service = NotificationService(self.db)
+                    
+                    enseignant_id = data.get('enseignant_id')
+                    if enseignant_id:
+                        notif_service.envoyer_notification(
+                            destinataire_id=enseignant_id,
+                            type_notification='info',
+                            titre='Réservation Approuvée',
+                            message=f"Votre réservation du {data['date']} - Salle {data['salle']} a été approuvée."
+                        )
+                    
+                    QMessageBox.information(self, "Succès", "Réservation approuvée.")
+                else:
+                    data['status'] = "Acceptée"
+                    
+            else:
+                # ═══════════════════════════════════════════════════════════
+                # REJECTION WORKFLOW - REQUIRES MOTIF
+                # ═══════════════════════════════════════════════════════════
+                
+                from PyQt6.QtWidgets import QInputDialog
+                
+                motif_rejet, ok = QInputDialog.getText(
+                    self, 
+                    "Motif de Refus", 
+                    "Veuillez indiquer le motif du refus (obligatoire):",
+                    text=""
+                )
+                
+                if not ok or not motif_rejet.strip():
+                    QMessageBox.warning(
+                        self, "Motif Requis", 
+                        "Un motif de refus est obligatoire pour rejeter une demande."
+                    )
+                    return
+                
+                # Update status in database with rejection reason
+                reservation_id = data.get('db_id')
+                reservation_type = data.get('type', 'reservation')
+                
+                if reservation_type == 'rattrapage' and reservation_id:
+                    demande = self.db.rejeter_demande(reservation_id, motif_rejet)
+                    
+                    if demande:
+                        # Notify professor with rejection reason
+                        from src.services_notification import NotificationService
+                        notif_service = NotificationService(self.db)
+                        
+                        enseignant_id = data.get('enseignant_id')
+                        if enseignant_id:
+                            notif_service.envoyer_notification(
+                                destinataire_id=enseignant_id,
+                                type_notification='alerte',
+                                titre='Demande Rejetée',
+                                message=f"Votre demande de rattrapage du {data['date']} a été rejetée.\n"
+                                        f"Motif: {motif_rejet}"
+                            )
+                        
+                        data['status'] = "Refusée"
+                        data['motif_rejet'] = motif_rejet
+                        
+                elif reservation_id:
+                    self.db.modifier_reservation_avec_motif(reservation_id, 'rejetee', motif_rejet)
+                    
+                    # Notify professor
+                    from src.services_notification import NotificationService
+                    notif_service = NotificationService(self.db)
+                    
+                    enseignant_id = data.get('enseignant_id')
+                    if enseignant_id:
+                        notif_service.envoyer_notification(
+                            destinataire_id=enseignant_id,
+                            type_notification='alerte',
+                            titre='Réservation Rejetée',
+                            message=f"Votre réservation du {data['date']} a été rejetée.\n"
+                                    f"Motif: {motif_rejet}"
+                        )
+                    
+                    data['status'] = "Refusée"
+                else:
+                    data['status'] = "Refusée"
+                    data['motif_rejet'] = motif_rejet
+                
+                QMessageBox.information(
+                    self, "Demande Rejetée", 
+                    f"Demande rejetée. Le professeur a été notifié avec le motif:\n{motif_rejet}"
+                )
             
             # Rafraîchir UI
             self.refresh_reservations()
+    
+    def load_reservations_from_db(self):
+        """Load reservations from database (rattrapages + reservations en attente)"""
+        self.reservations_data = []
+        
+        try:
+            # Load rattrapages en attente
+            demandes = self.db.get_demandes_en_attente()
+            for d in demandes:
+                # d: id, enseignant_id, groupe_id, salle_id, date, h_debut, h_fin, motif, statut, motif_rejet, seance_orig_id, date_creation, nom, prenom, salle_nom, groupe_nom
+                self.reservations_data.append({
+                    'db_id': d[0],
+                    'type': 'rattrapage',
+                    'enseignant_id': d[1],
+                    'groupe_id': d[2],
+                    'date': d[4],
+                    'prof': f"{d[13]} {d[12]}",  # prenom nom
+                    'salle': d[14],  # salle_nom
+                    'motif': f"Rattrapage: {d[7]}" if d[7] else "Rattrapage",
+                    'groupe': d[15]  # groupe_nom
+                })
+            
+            # Load reservations en attente
+            reservations = self.db.get_reservations_by_statut('en_attente')
+            for r in reservations:
+                # r: id, enseignant_id, salle_id, date, h_debut, h_fin, statut, motif, date_demande
+                ens = self.db.get_utilisateur_by_id(r[1])
+                salle = self.db.get_salle_by_id(r[2])
+                
+                self.reservations_data.append({
+                    'db_id': r[0],
+                    'type': 'reservation',
+                    'enseignant_id': r[1],
+                    'date': r[3],
+                    'prof': f"{ens[2]} {ens[1]}" if ens else "Inconnu",
+                    'salle': salle[1] if salle else "Inconnue",
+                    'motif': r[7] if len(r) > 7 and r[7] else "Réservation"
+                })
+                
+        except Exception as e:
+            print(f"Erreur chargement réservations: {e}")
+            # Fallback to demo data
+            self.reservations_data = [
+                {"date": "2024-02-10", "prof": "M. Alami", "salle": "Amphi B", "motif": "Examen Partiel"},
+                {"date": "2024-02-12", "prof": "Mme. Bennani", "salle": "Salle 12", "motif": "Séance Rattrapage"}
+            ]
 
     def simulate_new_request(self):
         """Ajoute une demande fictive pour tester"""

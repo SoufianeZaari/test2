@@ -166,7 +166,8 @@ class Database:
                 heure_debut TEXT NOT NULL,
                 heure_fin TEXT NOT NULL,
                 motif TEXT,
-                statut TEXT DEFAULT 'confirmé' CHECK(statut IN ('confirmé', 'annulé')),
+                statut TEXT DEFAULT 'en_attente' CHECK(statut IN ('en_attente', 'confirmé', 'annulé', 'rejete')),
+                motif_rejet TEXT,
                 seance_originale_id INTEGER,
                 date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (enseignant_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
@@ -174,6 +175,21 @@ class Database:
                 FOREIGN KEY (salle_id) REFERENCES salles(id) ON DELETE CASCADE,
                 FOREIGN KEY (seance_originale_id) REFERENCES seances(id) ON DELETE SET NULL,
                 UNIQUE (salle_id, date, heure_debut, statut) 
+            )
+        ''')
+        
+        # Table 11 : Modules (pour contrainte spécialité enseignant)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS modules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE NOT NULL,
+                nom TEXT NOT NULL,
+                departement TEXT NOT NULL,
+                filiere_id INTEGER,
+                volume_cours INTEGER DEFAULT 0,
+                volume_td INTEGER DEFAULT 0,
+                volume_tp INTEGER DEFAULT 0,
+                FOREIGN KEY (filiere_id) REFERENCES filieres(id) ON DELETE SET NULL
             )
         ''')
         
@@ -1284,3 +1300,266 @@ class Database:
         etudiants = cursor.fetchall()
         conn.close()
         return etudiants
+    
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES MODULES (Contrainte spécialité/département)
+    # ═══════════════════════════════════════════════════════════
+    
+    def ajouter_module(self, code, nom, departement, filiere_id=None, 
+                       volume_cours=0, volume_td=0, volume_tp=0):
+        """Ajoute un module avec son département"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO modules (code, nom, departement, filiere_id, 
+                                    volume_cours, volume_td, volume_tp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (code, nom, departement, filiere_id, volume_cours, volume_td, volume_tp))
+            
+            conn.commit()
+            module_id = cursor.lastrowid
+            return module_id
+        except sqlite3.IntegrityError:
+            print(f"❌ Module {code} existe déjà")
+            return None
+        finally:
+            conn.close()
+    
+    def get_modules_by_departement(self, departement):
+        """Récupère les modules d'un département"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM modules 
+            WHERE departement = ?
+            ORDER BY nom
+        ''', (departement,))
+        
+        modules = cursor.fetchall()
+        conn.close()
+        return modules
+    
+    def get_enseignants_by_specialite(self, specialite):
+        """Récupère les enseignants d'une spécialité/département"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM utilisateurs 
+            WHERE type_user = 'enseignant' AND specialite = ?
+        ''', (specialite,))
+        
+        enseignants = cursor.fetchall()
+        conn.close()
+        return enseignants
+    
+    def valider_enseignant_module(self, enseignant_id, module_departement):
+        """
+        Vérifie si un enseignant peut enseigner un module basé sur sa spécialité.
+        Retourne (is_valid, enseignant_specialite)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT specialite FROM utilisateurs 
+            WHERE id = ? AND type_user = 'enseignant'
+        ''', (enseignant_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return False, None
+        
+        enseignant_specialite = result[0]
+        
+        # Si pas de spécialité définie, autoriser (fallback)
+        if not enseignant_specialite or not module_departement:
+            return True, enseignant_specialite
+        
+        # Vérification stricte: spécialité doit correspondre au département
+        # On utilise une correspondance flexible (contient)
+        specialite_lower = enseignant_specialite.lower()
+        departement_lower = module_departement.lower()
+        
+        # Correspondances connues
+        CORRESPONDANCES = {
+            'informatique': ['informatique', 'génie informatique', 'gi', 'smi', 'info'],
+            'mathématiques': ['mathématiques', 'math', 'statistiques', 'sma'],
+            'physique': ['physique', 'génie physique', 'smp'],
+            'chimie': ['chimie', 'génie des procédés', 'smc'],
+            'biologie': ['biologie', 'biotechnologies', 'svt'],
+            'géologie': ['géologie', 'géosciences', 'stu'],
+            'génie électrique': ['électrique', 'électronique', 'génie électrique'],
+            'génie mécanique': ['mécanique', 'génie mécanique', 'industriel'],
+            'génie civil': ['civil', 'génie civil', 'btp'],
+        }
+        
+        for dept_key, aliases in CORRESPONDANCES.items():
+            if any(alias in departement_lower for alias in aliases):
+                if any(alias in specialite_lower for alias in aliases):
+                    return True, enseignant_specialite
+        
+        # Si pas de correspondance trouvée mais contient le même mot
+        if departement_lower in specialite_lower or specialite_lower in departement_lower:
+            return True, enseignant_specialite
+        
+        return False, enseignant_specialite
+    
+    # ═══════════════════════════════════════════════════════════
+    # MÉTHODES RÉSERVATIONS AVANCÉES (Workflow Admin Approval)
+    # ═══════════════════════════════════════════════════════════
+    
+    def creer_demande_reservation(self, enseignant_id, salle_id, groupe_id, date, 
+                                  heure_debut, heure_fin, type_demande, motif=""):
+        """
+        Crée une demande de réservation avec statut 'en_attente'
+        Type: 'rattrapage' ou 'reprogrammation'
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO rattrapages (enseignant_id, groupe_id, salle_id, date, 
+                                        heure_debut, heure_fin, motif, statut)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'en_attente')
+            ''', (enseignant_id, groupe_id, salle_id, date, heure_debut, heure_fin, motif))
+            
+            conn.commit()
+            demande_id = cursor.lastrowid
+            return demande_id
+        except Exception as e:
+            print(f"❌ Erreur création demande: {e}")
+            return None
+        finally:
+            conn.close()
+    
+    def get_demandes_en_attente(self):
+        """Récupère toutes les demandes en attente d'approbation"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT r.*, u.nom, u.prenom, s.nom as salle_nom, g.nom as groupe_nom
+            FROM rattrapages r
+            JOIN utilisateurs u ON r.enseignant_id = u.id
+            JOIN salles s ON r.salle_id = s.id
+            JOIN groupes g ON r.groupe_id = g.id
+            WHERE r.statut = 'en_attente'
+            ORDER BY r.date_creation DESC
+        ''')
+        
+        demandes = cursor.fetchall()
+        conn.close()
+        return demandes
+    
+    def approuver_demande(self, demande_id):
+        """
+        Approuve une demande de réservation.
+        Change le statut en 'confirmé' (la salle est maintenant verrouillée)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE rattrapages 
+            SET statut = 'confirmé'
+            WHERE id = ?
+        ''', (demande_id,))
+        
+        # Récupérer les infos pour notification
+        cursor.execute('SELECT * FROM rattrapages WHERE id = ?', (demande_id,))
+        demande = cursor.fetchone()
+        
+        conn.commit()
+        conn.close()
+        return demande
+    
+    def rejeter_demande(self, demande_id, motif_rejet):
+        """
+        Rejette une demande de réservation avec un motif obligatoire.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE rattrapages 
+            SET statut = 'rejete', motif_rejet = ?
+            WHERE id = ?
+        ''', (motif_rejet, demande_id))
+        
+        # Récupérer les infos pour notification
+        cursor.execute('SELECT * FROM rattrapages WHERE id = ?', (demande_id,))
+        demande = cursor.fetchone()
+        
+        conn.commit()
+        conn.close()
+        return demande
+    
+    def get_demande_by_id(self, demande_id):
+        """Récupère une demande par son ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT r.*, u.nom, u.prenom, s.nom as salle_nom, g.nom as groupe_nom
+            FROM rattrapages r
+            JOIN utilisateurs u ON r.enseignant_id = u.id
+            JOIN salles s ON r.salle_id = s.id
+            JOIN groupes g ON r.groupe_id = g.id
+            WHERE r.id = ?
+        ''', (demande_id,))
+        
+        demande = cursor.fetchone()
+        conn.close()
+        return demande
+    
+    def get_reservation_by_id(self, reservation_id):
+        """Récupère une réservation par son ID avec infos jointes"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT r.*, u.nom, u.prenom, s.nom as salle_nom
+            FROM reservations r
+            JOIN utilisateurs u ON r.enseignant_id = u.id
+            JOIN salles s ON r.salle_id = s.id
+            WHERE r.id = ?
+        ''', (reservation_id,))
+        
+        reservation = cursor.fetchone()
+        conn.close()
+        return reservation
+    
+    def modifier_reservation_avec_motif(self, reservation_id, statut, motif_rejet=None):
+        """Modifie le statut d'une réservation avec motif de rejet optionnel"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Ajouter colonne motif_rejet si elle n'existe pas
+        try:
+            cursor.execute('ALTER TABLE reservations ADD COLUMN motif_rejet TEXT')
+        except:
+            pass  # Colonne existe déjà
+        
+        if motif_rejet:
+            cursor.execute('''
+                UPDATE reservations 
+                SET statut = ?, motif_rejet = ?
+                WHERE id = ?
+            ''', (statut, motif_rejet, reservation_id))
+        else:
+            cursor.execute('''
+                UPDATE reservations 
+                SET statut = ?
+                WHERE id = ?
+            ''', (statut, reservation_id))
+        
+        conn.commit()
+        conn.close()
+        return True
