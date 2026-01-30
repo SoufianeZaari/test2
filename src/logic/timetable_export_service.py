@@ -46,7 +46,8 @@ class TimetableExportService:
                 conn.close()
                 return False, None, "Groupe introuvable"
             
-            groupe_nom = groupe['nom']
+            # Handle both tuple and dict access
+            groupe_nom = groupe[1] if isinstance(groupe, tuple) else groupe.get('nom', f"Groupe_{groupe_id}")
             
             # Get seances for the group
             if semaine_debut and semaine_fin:
@@ -56,8 +57,25 @@ class TimetableExportService:
             
             conn.close()
             
+            # Convert seances to dict format if needed
+            seances_dict = []
+            for s in seances:
+                if isinstance(s, tuple):
+                    seances_dict.append({
+                        'id': s[0], 'titre': s[1], 'type_seance': s[2],
+                        'date': s[3], 'heure_debut': s[4], 'heure_fin': s[5],
+                        'salle_id': s[6], 'enseignant_id': s[7], 'groupe_id': s[8]
+                    })
+                elif isinstance(s, dict):
+                    seances_dict.append(s)
+                else:
+                    try:
+                        seances_dict.append(dict(s))
+                    except (TypeError, ValueError):
+                        continue
+            
             # Prepare data for export
-            export_data = self._prepare_timetable_data(seances, groupe_nom, None)
+            export_data = self._prepare_timetable_data(seances_dict, groupe_nom, None)
             
             # Export based on format
             if format_type.lower() == "pdf":
@@ -95,7 +113,12 @@ class TimetableExportService:
                 conn.close()
                 return False, None, "Enseignant introuvable"
             
-            enseignant_nom = f"{enseignant['prenom']} {enseignant['nom']}"
+            # Handle both tuple and dict access
+            if isinstance(enseignant, tuple):
+                # Structure: (id, nom, prenom, email, mot_de_passe, type_user, specialite, groupe_id, duree_max_jour, date_creation)
+                enseignant_nom = f"{enseignant[2]} {enseignant[1]}"
+            else:
+                enseignant_nom = f"{enseignant.get('prenom', '')} {enseignant.get('nom', '')}"
             
             # Get seances for the teacher
             if semaine_debut and semaine_fin:
@@ -103,31 +126,66 @@ class TimetableExportService:
             else:
                 seances = self.db.get_seances_by_enseignant(enseignant_id)
             
+            # Convert seances to dict format
+            seances_dict = []
+            for s in seances:
+                if isinstance(s, tuple):
+                    seances_dict.append({
+                        'id': s[0], 'titre': s[1], 'type_seance': s[2],
+                        'date': s[3], 'heure_debut': s[4], 'heure_fin': s[5],
+                        'salle_id': s[6], 'enseignant_id': s[7], 'groupe_id': s[8]
+                    })
+                elif isinstance(s, dict):
+                    seances_dict.append(s)
+                else:
+                    try:
+                        seances_dict.append(dict(s))
+                    except (TypeError, ValueError):
+                        continue
+            
             # Get approved reservations for the teacher
             cursor.execute('''
                 SELECT * FROM reservations
                 WHERE enseignant_id = ? AND statut = 'validee'
             ''', (enseignant_id,))
-            reservations = [dict(row) for row in cursor.fetchall()]
+            reservations_tuples = cursor.fetchall()
             
             # Convert reservations to seance format for display
-            for res in reservations:
-                seances.append({
-                    'id': res['id'],
-                    'titre': f"Réservation - {res.get('motif', '')}",
-                    'type_seance': 'Réservation',
-                    'date': res['date'],
-                    'heure_debut': res['heure_debut'],
-                    'heure_fin': res['heure_fin'],
-                    'salle_id': res['salle_id'],
-                    'enseignant_id': res['enseignant_id'],
-                    'groupe_id': None
-                })
+            for res in reservations_tuples:
+                if isinstance(res, tuple):
+                    # Structure: (id, enseignant_id, salle_id, date, heure_debut, heure_fin, statut, motif, date_demande)
+                    seances_dict.append({
+                        'id': res[0],
+                        'titre': f"Réservation - {res[7] or ''}",
+                        'type_seance': 'Réservation',
+                        'date': res[3],
+                        'heure_debut': res[4],
+                        'heure_fin': res[5],
+                        'salle_id': res[2],
+                        'enseignant_id': res[1],
+                        'groupe_id': None
+                    })
+                else:
+                    try:
+                        res_dict = dict(res) if not isinstance(res, dict) else res
+                        seances_dict.append({
+                            'id': res_dict['id'],
+                            'titre': f"Réservation - {res_dict.get('motif', '')}",
+                            'type_seance': 'Réservation',
+                            'date': res_dict['date'],
+                            'heure_debut': res_dict['heure_debut'],
+                            'heure_fin': res_dict['heure_fin'],
+                            'salle_id': res_dict['salle_id'],
+                            'enseignant_id': res_dict['enseignant_id'],
+                            'groupe_id': None
+                        })
+                    except (TypeError, KeyError, ValueError):
+                        continue
             
             conn.close()
             
             # Prepare data for export
-            export_data = self._prepare_timetable_data(seances, None, enseignant_nom)
+            export_data = self._prepare_timetable_data(seances_dict, None, enseignant_nom)
             
             # Export based on format
             if format_type.lower() == "pdf":
@@ -147,7 +205,7 @@ class TimetableExportService:
         """
         Prepares timetable data for export
         Args:
-            seances: List of sessions
+            seances: List of sessions (as dictionaries)
             groupe_nom: Group name (for student export)
             enseignant_nom: Teacher name (for teacher export)
         Returns:
@@ -179,7 +237,7 @@ class TimetableExportService:
                 cursor.execute("SELECT nom FROM salles WHERE id = ?", (salle_id,))
                 salle = cursor.fetchone()
                 if salle:
-                    salle_nom = salle['nom']
+                    salle_nom = salle[0] if isinstance(salle, tuple) else salle.get('nom', 'N/A')
             
             # Get teacher name (for group timetable)
             enseignant_id = seance.get('enseignant_id')
@@ -188,7 +246,10 @@ class TimetableExportService:
                 cursor.execute("SELECT nom, prenom FROM utilisateurs WHERE id = ?", (enseignant_id,))
                 enseignant = cursor.fetchone()
                 if enseignant:
-                    enseignant_nom_seance = f"{enseignant['prenom']} {enseignant['nom']}"
+                    if isinstance(enseignant, tuple):
+                        enseignant_nom_seance = f"{enseignant[1]} {enseignant[0]}"
+                    else:
+                        enseignant_nom_seance = f"{enseignant.get('prenom', '')} {enseignant.get('nom', '')}"
             
             # Get group name (for teacher timetable)
             groupe_id = seance.get('groupe_id')
@@ -197,7 +258,7 @@ class TimetableExportService:
                 cursor.execute("SELECT nom FROM groupes WHERE id = ?", (groupe_id,))
                 groupe = cursor.fetchone()
                 if groupe:
-                    groupe_nom_seance = groupe['nom']
+                    groupe_nom_seance = groupe[0] if isinstance(groupe, tuple) else groupe.get('nom', 'N/A')
             
             weekly_schedule[day_name].append({
                 'time': f"{seance.get('heure_debut', '')} - {seance.get('heure_fin', '')}",

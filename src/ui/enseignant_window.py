@@ -23,11 +23,15 @@ from src.ui.styles import (
 
 class UserWrapper:
     def __init__(self, user_tuple):
+        # Structure: (id, nom, prenom, email, mot_de_passe, type_user, specialite, groupe_id, duree_max_jour, date_creation)
         self.id = user_tuple[0]
         self.nom = user_tuple[1]
         self.prenom = user_tuple[2]
         self.email = user_tuple[3]
-        # Map other fields if necessary
+        self.type_user = user_tuple[5] if len(user_tuple) > 5 else None
+        self.specialite = user_tuple[6] if len(user_tuple) > 6 else None
+        self.groupe_id = user_tuple[7] if len(user_tuple) > 7 else None
+        self.duree_max_jour = user_tuple[8] if len(user_tuple) > 8 else 480
 
 class EnseignantWindow(QWidget):
     logout_signal = pyqtSignal()
@@ -142,23 +146,43 @@ class EnseignantWindow(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         
-        # Actions (Imprimer)
-        actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
+        # En-tête avec infos enseignant
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            background-color: white; 
+            border-radius: 10px; 
+            padding: 15px;
+            border: 1px solid #E0E0E0;
+        """)
+        h_layout = QHBoxLayout(header_frame)
         
-        for fmt in ["PDF", "Excel", "Image"]:
-            btn = QPushButton(f"Imprimer {fmt}")
+        # Info Enseignant
+        specialite = getattr(self.user, 'specialite', None) or "N/A"
+        info_str = f"""
+        <div style='font-size: 16px; color: {COLORS['text_dark']};'>
+            <b>Enseignant:</b> {self.user.prenom} {self.user.nom} | 
+            <b>Spécialité:</b> {specialite}
+        </div>
+        """
+        info_label = QLabel(info_str)
+        info_label.setTextFormat(Qt.TextFormat.RichText)
+        h_layout.addWidget(info_label)
+        h_layout.addStretch()
+        
+        # Actions (Export) with real functionality
+        for fmt in ["PDF", "Excel", "PNG"]:
+            btn = QPushButton(f"Télécharger {fmt}")
             btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
-            btn.clicked.connect(lambda _, f=fmt: QMessageBox.information(self, "Export", f"Export {f} lancé..."))
-            actions_layout.addWidget(btn)
-            
-        layout.addLayout(actions_layout)
+            btn.clicked.connect(lambda _, f=fmt: self.export_timetable(f))
+            h_layout.addWidget(btn)
+        
+        layout.addWidget(header_frame)
         
         # Table
         self.schedule_table = QTableWidget(5, 6)
         self.schedule_table.setHorizontalHeaderLabels(["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"])
         time_slots = ["08:30 - 10:00", "10:15 - 11:45", "12:00 - 13:30", "13:45 - 15:15", "15:30 - 17:00"]
-        self.schedule_table.setVerticalHeaderLabels(time_slots) # Using standard slots roughly
+        self.schedule_table.setVerticalHeaderLabels(time_slots)
         self.schedule_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.schedule_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.schedule_table.setStyleSheet(TABLE_STYLE)
@@ -168,6 +192,38 @@ class EnseignantWindow(QWidget):
         
         layout.addWidget(self.schedule_table)
         return page
+    
+    def export_timetable(self, format_type):
+        """Export the teacher's personal timetable to the specified format"""
+        try:
+            from src.logic.timetable_export_service import TimetableExportService
+            
+            export_service = TimetableExportService(self.db)
+            
+            # Map format
+            format_map = {"PDF": "pdf", "Excel": "excel", "PNG": "png"}
+            export_format = format_map.get(format_type, "pdf")
+            
+            # Export
+            success, filepath, error = export_service.export_teacher_timetable(
+                self.user.id, 
+                export_format
+            )
+            
+            if success and filepath:
+                QMessageBox.information(
+                    self, 
+                    "Export Réussi", 
+                    f"Votre emploi du temps a été exporté avec succès!\n\nFichier: {filepath}"
+                )
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Erreur d'Export", 
+                    f"L'export a échoué: {error or 'Erreur inconnue'}"
+                )
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {str(e)}")
 
     def load_schedule(self):
         """Charge l'emploi du temps de l'enseignant"""
@@ -217,77 +273,189 @@ class EnseignantWindow(QWidget):
         table.setCellWidget(row, col, item)
 
     def create_reservation_page(self):
+        """
+        Page for professors to request room reservation (Rattrapage/Reprogrammation).
+        Requests go to 'pending' status and require Admin approval.
+        """
         page = QWidget()
         layout = QVBoxLayout(page)
         
-        # 2 Options: Choisir ou Créer
+        # Info Banner
+        info_banner = QLabel(
+            "⚠️ Les demandes de réservation sont soumises à l'approbation de l'administrateur. "
+            "Vous recevrez une notification une fois votre demande traitée."
+        )
+        info_banner.setStyleSheet(
+            f"background-color: #FFF3CD; color: #856404; padding: 10px; "
+            f"border-radius: 5px; border: 1px solid #FFEEBA; font-size: 13px;"
+        )
+        info_banner.setWordWrap(True)
+        layout.addWidget(info_banner)
         
-        # Option 1: Choisir Séance
-        opt1_frame = QFrame()
-        opt1_frame.setStyleSheet(CARD_STYLE)
-        opt1_layout = QVBoxLayout(opt1_frame)
-        opt1_layout.addWidget(QLabel("Option A: Pour une séance existante"))
+        # Main Form Frame
+        form_frame = QFrame()
+        form_frame.setStyleSheet(CARD_STYLE)
+        form_layout = QVBoxLayout(form_frame)
         
-        cb_layout = QHBoxLayout()
-        cb_layout.addWidget(QLabel("Groupe:"))
-        self.res_group_cb = QComboBox()
-        self.res_group_cb.addItem("G1 - Génie Info")
-        self.res_group_cb.setStyleSheet(INPUT_STYLE)
-        cb_layout.addWidget(self.res_group_cb)
-        
-        cb_layout.addWidget(QLabel("Séance:"))
-        self.res_session_cb = QComboBox()
-        self.res_session_cb.addItem("Lundi 08:30 - Java")
-        self.res_session_cb.setStyleSheet(INPUT_STYLE)
-        cb_layout.addWidget(self.res_session_cb)
-        
-        opt1_layout.addLayout(cb_layout)
-        layout.addWidget(opt1_frame)
-        
-        # Option 2: Créer Séance
-        opt2_frame = QFrame()
-        opt2_frame.setStyleSheet(CARD_STYLE)
-        opt2_layout = QVBoxLayout(opt2_frame)
-        opt2_layout.addWidget(QLabel("Option B: Créer une nouvelle séance"))
+        form_title = QLabel("Nouvelle Demande de Réservation")
+        form_title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text_dark']}; margin-bottom: 10px;")
+        form_layout.addWidget(form_title)
         
         grid = QGridLayout()
+        grid.setSpacing(15)
+        
+        # Date
         grid.addWidget(QLabel("Date:"), 0, 0)
-        self.new_res_date = QDateEdit(QDate.currentDate())
+        self.new_res_date = QDateEdit(QDate.currentDate().addDays(1))
         self.new_res_date.setCalendarPopup(True)
+        self.new_res_date.setMinimumDate(QDate.currentDate())
         self.new_res_date.setStyleSheet(INPUT_STYLE)
         grid.addWidget(self.new_res_date, 0, 1)
         
-        grid.addWidget(QLabel("Heure:"), 0, 2)
+        # Heure Début
+        grid.addWidget(QLabel("Heure Début:"), 0, 2)
         self.new_res_time = QTimeEdit(QTime(8, 30))
         self.new_res_time.setStyleSheet(INPUT_STYLE)
         grid.addWidget(self.new_res_time, 0, 3)
         
-        grid.addWidget(QLabel("Matière:"), 1, 0)
-        self.new_res_subject = QComboBox()
-        self.new_res_subject.addItems(["Java", "UML", "Anglais"])
-        self.new_res_subject.setStyleSheet(INPUT_STYLE)
-        grid.addWidget(self.new_res_subject, 1, 1)
+        # Heure Fin
+        grid.addWidget(QLabel("Heure Fin:"), 0, 4)
+        self.new_res_time_end = QTimeEdit(QTime(10, 0))
+        self.new_res_time_end.setStyleSheet(INPUT_STYLE)
+        grid.addWidget(self.new_res_time_end, 0, 5)
         
-        grid.addWidget(QLabel("Type:"), 1, 2)
+        # Groupe
+        grid.addWidget(QLabel("Groupe:"), 1, 0)
+        self.new_res_groupe = QComboBox()
+        self.new_res_groupe.setStyleSheet(INPUT_STYLE)
+        self.load_groupes_combobox()
+        grid.addWidget(self.new_res_groupe, 1, 1)
+        
+        # Salle
+        grid.addWidget(QLabel("Salle Souhaitée:"), 1, 2)
+        self.new_res_salle = QComboBox()
+        self.new_res_salle.setStyleSheet(INPUT_STYLE)
+        self.load_salles_combobox()
+        grid.addWidget(self.new_res_salle, 1, 3, 1, 2)
+        
+        # Type de demande
+        grid.addWidget(QLabel("Type:"), 2, 0)
         self.new_res_type = QComboBox()
-        self.new_res_type.addItems(["Cours", "TP", "TD", "Examen", "Rattrapage"])
+        self.new_res_type.addItems(["Rattrapage", "Reprogrammation", "Examen", "Autre"])
         self.new_res_type.setStyleSheet(INPUT_STYLE)
-        grid.addWidget(self.new_res_type, 1, 3)
-
-        opt2_layout.addLayout(grid)
-        layout.addWidget(opt2_frame)
+        grid.addWidget(self.new_res_type, 2, 1)
         
-        # Bouton Action
+        # Motif
+        grid.addWidget(QLabel("Motif / Détails:"), 2, 2)
+        self.new_res_motif = QTextEdit()
+        self.new_res_motif.setStyleSheet(INPUT_STYLE)
+        self.new_res_motif.setMaximumHeight(60)
+        self.new_res_motif.setPlaceholderText("Décrivez le motif de votre demande...")
+        grid.addWidget(self.new_res_motif, 2, 3, 1, 3)
+        
+        form_layout.addLayout(grid)
+        layout.addWidget(form_frame)
+        
+        # Bouton Soumettre
         btn_layout = QHBoxLayout()
-        btn_reserve = QPushButton("Rechercher Salle & Réserver")
+        btn_reserve = QPushButton("Soumettre la Demande")
         btn_reserve.setStyleSheet(PRIMARY_BUTTON_STYLE)
-        btn_reserve.clicked.connect(lambda: QMessageBox.information(self, "Réservation", "Demande de réservation simulée (Salle B12 trouvée)."))
+        btn_reserve.clicked.connect(self.submit_reservation_request)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_reserve)
         
         layout.addLayout(btn_layout)
         layout.addStretch()
         return page
+    
+    def load_groupes_combobox(self):
+        """Load groups into combobox"""
+        try:
+            groupes = self.db.get_tous_groupes()
+            self.new_res_groupe.clear()
+            for g in groupes:
+                # g: id, nom, effectif, filiere_id
+                self.new_res_groupe.addItem(g[1], g[0])  # Display nom, store id
+        except Exception as e:
+            print(f"Error loading groups: {e}")
+            self.new_res_groupe.addItem("Aucun groupe", 0)
+    
+    def load_salles_combobox(self):
+        """Load rooms into combobox"""
+        try:
+            salles = self.db.get_toutes_salles()
+            self.new_res_salle.clear()
+            for s in salles:
+                # s: id, nom, capacite, type_salle, equipements
+                self.new_res_salle.addItem(f"{s[1]} ({s[3]}, {s[2]} places)", s[0])
+        except Exception as e:
+            print(f"Error loading rooms: {e}")
+            self.new_res_salle.addItem("Aucune salle", 0)
+    
+    def submit_reservation_request(self):
+        """
+        Submit a reservation request with 'pending' status.
+        The request requires Admin approval before confirmation.
+        """
+        date = self.new_res_date.date().toString("yyyy-MM-dd")
+        h_debut = self.new_res_time.time().toString("HH:mm")
+        h_fin = self.new_res_time_end.time().toString("HH:mm")
+        groupe_id = self.new_res_groupe.currentData()
+        salle_id = self.new_res_salle.currentData()
+        type_demande = self.new_res_type.currentText()
+        motif = self.new_res_motif.toPlainText().strip()
+        
+        # Validation
+        if self.new_res_time.time() >= self.new_res_time_end.time():
+            QMessageBox.warning(self, "Erreur", "L'heure de fin doit être après l'heure de début.")
+            return
+        
+        if not groupe_id or groupe_id == 0:
+            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un groupe.")
+            return
+        
+        if not salle_id or salle_id == 0:
+            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner une salle.")
+            return
+        
+        if not motif:
+            motif = type_demande
+        else:
+            motif = f"{type_demande}: {motif}"
+        
+        try:
+            # Create request with 'pending' status
+            demande_id = self.db.creer_demande_reservation(
+                enseignant_id=self.user.id,
+                salle_id=salle_id,
+                groupe_id=groupe_id,
+                date=date,
+                heure_debut=h_debut,
+                heure_fin=h_fin,
+                type_demande=type_demande,
+                motif=motif
+            )
+            
+            if demande_id:
+                QMessageBox.information(
+                    self, 
+                    "Demande Soumise",
+                    f"Votre demande de réservation a été soumise avec succès.\n\n"
+                    f"📋 Référence: #{demande_id}\n"
+                    f"📅 Date: {date}\n"
+                    f"⏰ Horaire: {h_debut} - {h_fin}\n"
+                    f"📍 Salle: {self.new_res_salle.currentText()}\n\n"
+                    f"⏳ Statut: En attente d'approbation\n\n"
+                    f"Vous recevrez une notification lorsque l'administrateur "
+                    f"aura traité votre demande."
+                )
+                # Clear form
+                self.new_res_motif.clear()
+            else:
+                QMessageBox.warning(self, "Erreur", "Erreur lors de la soumission de la demande.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur: {str(e)}")
 
     # Removed perform_session_search
 
@@ -372,6 +540,15 @@ class EnseignantWindow(QWidget):
         return page
 
     def save_unavailability(self):
+        """
+        Save teacher unavailability (absence).
+        This requires NO APPROVAL - just immediate reporting and notifications.
+        
+        Actions:
+        1. Save the absence in database
+        2. Immediately notify Admin (for records)
+        3. Immediately notify Students (class is off)
+        """
         d_start = self.ab_date_start.date().toString("yyyy-MM-dd")
         d_end = self.ab_date_end.date().toString("yyyy-MM-dd") 
         reason = self.ab_reason.toPlainText()
@@ -407,31 +584,78 @@ class EnseignantWindow(QWidget):
         final_motif = f"{period_msg} {full_msg}"
             
         try:
-             conn = self.db.get_connection()
-             cursor = conn.cursor()
-             
-             # Tentative d'insertion avec gestion adaptative des colonnes
-             try:
-                 # Le schéma standard a date_debut ET date_fin (NOT NULL)
-                 cursor.execute('''
-                    INSERT INTO disponibilites (enseignant_id, date_debut, date_fin, motif) 
-                    VALUES (?, ?, ?, ?)
-                 ''', (self.user.id, d_start, d_end, final_motif))
-             except Exception as e:
-                 # Fallback sur 'date' si la colonne 'date_debut' n'existe pas (ancienne version)
-                 # Note: Si date_fin manque, cela echouera aussi si on essaie d'inserer date_fin.
-                 # On suppose ici un fallback simple.
-                 cursor.execute('''
-                    INSERT INTO disponibilites (enseignant_id, date, motif) 
-                    VALUES (?, ?, ?)
-                 ''', (self.user.id, d_start, final_motif))
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            
+            # 1. Save absence in database
+            try:
+                cursor.execute('''
+                   INSERT INTO disponibilites (enseignant_id, date_debut, date_fin, motif) 
+                   VALUES (?, ?, ?, ?)
+                ''', (self.user.id, d_start, d_end, final_motif))
+            except Exception:
+                cursor.execute('''
+                   INSERT INTO disponibilites (enseignant_id, date, motif) 
+                   VALUES (?, ?, ?)
+                ''', (self.user.id, d_start, final_motif))
                  
-             conn.commit()
-             conn.close()
-             QMessageBox.information(self, "Succès", "Votre indisponibilité a été enregistrée avec succès.")
-             self.ab_reason.clear()
+            conn.commit()
+            conn.close()
+            
+            # ═══════════════════════════════════════════════════════════
+            # 2. IMMEDIATE NOTIFICATIONS (No approval required)
+            # ═══════════════════════════════════════════════════════════
+            
+            from src.services_notification import NotificationService
+            notif_service = NotificationService(self.db)
+            
+            enseignant_nom = f"{self.user.prenom} {self.user.nom}"
+            
+            # 2a. Notify all Admins (for records)
+            nb_admins = notif_service.notifier_admins(
+                type_notification='info',
+                titre='Absence Enseignant Signalée',
+                message=f"L'enseignant {enseignant_nom} a signalé une absence.\n"
+                        f"Période: {d_start} - {d_end}\n"
+                        f"Motif: {reason or 'Non spécifié'}"
+            )
+            
+            # 2b. Notify Students of affected courses
+            # Find sessions in this period and notify their groups
+            seances_affectees = self.db.get_seances_enseignant_periode(
+                self.user.id, d_start, d_end
+            )
+            
+            groupes_notifies = set()
+            nb_etudiants_notifies = 0
+            
+            for seance in seances_affectees:
+                groupe_id = seance[8] if len(seance) > 8 else None
+                
+                if groupe_id and groupe_id not in groupes_notifies:
+                    nb_etudiants, _ = notif_service.notifier_groupe(
+                        groupe_id=groupe_id,
+                        type_notification='annulation',
+                        titre='Cours Annulé',
+                        message=f"Le cours de {seance[1]} avec {enseignant_nom} est annulé.\n"
+                                f"Date: {seance[3]}\n"
+                                f"Motif: {reason or 'Absence enseignant'}"
+                    )
+                    nb_etudiants_notifies += nb_etudiants
+                    groupes_notifies.add(groupe_id)
+            
+            # Success message with notification summary
+            success_msg = "Votre indisponibilité a été enregistrée avec succès.\n\n"
+            success_msg += "Notifications envoyées:\n"
+            success_msg += f"• {nb_admins} administrateur(s) notifié(s)\n"
+            success_msg += f"• {nb_etudiants_notifies} étudiant(s) notifié(s) "
+            success_msg += f"({len(groupes_notifies)} groupe(s) affecté(s))"
+            
+            QMessageBox.information(self, "Succès", success_msg)
+            self.ab_reason.clear()
+            
         except Exception as e:
-             QMessageBox.warning(self, "Erreur", f"Erreur lors de l'enregistrement: {e}")
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de l'enregistrement: {e}")
 
     def switch_page(self, page_id):
         titles = {

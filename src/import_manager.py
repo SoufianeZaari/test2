@@ -4,6 +4,10 @@ import os
 from src.database import Database
 from config import COLONNES_ETUDIANTS, COLONNES_ENSEIGNANTS, COLONNES_SALLES, COLONNES_GROUPES
 
+# Default filière level for auto-created filières during CSV import
+# L3 (Licence 3) is the most common level at FSTT for undergraduate programs
+DEFAULT_FILIERE_NIVEAU = "L3"
+
 class ImportManager:
     """Classe pour gérer les imports massifs CSV de la FSTT"""
     
@@ -113,7 +117,7 @@ class ImportManager:
         return True
 
     def import_groupes(self, fichier_path):
-        """Importe les groupes et remplace les anciens"""
+        """Importe les groupes et remplace les anciens - Crée automatiquement les filières si nécessaire"""
         donnees = self.parse_csv(fichier_path)
         
         if not donnees:
@@ -128,21 +132,31 @@ class ImportManager:
         
         succes = 0
         erreurs = 0
+        filieres_creees = 0
         
         for ligne in donnees:
             # 1. Récupérer ou créer la filière
-            filiere = self.db.get_filiere_by_nom(ligne['filiere'])
+            filiere_nom = ligne['filiere'].strip()
+            filiere = self.db.get_filiere_by_nom(filiere_nom)
             
             if not filiere:
-                print(f"⚠️ Filière '{ligne['filiere']}' introuvable pour le groupe '{ligne['nom']}'")
-                erreurs += 1
-                continue
+                # Auto-créer la filière avec le niveau par défaut
+                filiere_id = self.db.ajouter_filiere(filiere_nom, DEFAULT_FILIERE_NIVEAU)
+                if filiere_id:
+                    print(f"✅ Filière créée automatiquement : '{filiere_nom}' (Niveau: {DEFAULT_FILIERE_NIVEAU})")
+                    filieres_creees += 1
+                else:
+                    print(f"⚠️ Impossible de créer la filière '{filiere_nom}' pour le groupe '{ligne['nom']}'")
+                    erreurs += 1
+                    continue
+            else:
+                filiere_id = filiere[0]  # ID de la filière
             
             # 2. Ajouter le groupe
             res = self.db.ajouter_groupe(
                 ligne['nom'],
                 int(ligne['effectif']),
-                filiere[0]  # ID de la filière
+                filiere_id
             )
             
             if res:
@@ -151,6 +165,9 @@ class ImportManager:
                 erreurs += 1
         
         self.db.ajouter_historique_import("Groupes", succes, os.path.basename(fichier_path), 1)
+        
+        if filieres_creees > 0:
+            print(f"📚 {filieres_creees} filières créées automatiquement.")
         
         if erreurs > 0:
             print(f"⚠️ Import partiel : {succes} groupes ajoutés, {erreurs} erreurs.")

@@ -27,7 +27,11 @@ ENV/
 .env
 .env.local
 
-# Exports
+# Exports (fichiers générés)
 exports/*.pdf
 exports/*.xlsx
 exports/*.xls
+exports/*.txt
+exports/*.csv
+exports/*.png
+exports/*.jpg

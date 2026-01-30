@@ -133,11 +133,9 @@ class AdminWindow(QWidget):
         
         self.setStyleSheet(GLOBAL_STYLE)
         
-        # État des réservations (Simulation)
-        self.reservations_data = [
-            {"date": "2024-02-10", "prof": "M. Alami", "salle": "Amphi B", "motif": "Examen Partiel"},
-            {"date": "2024-02-12", "prof": "Mme. Bennani", "salle": "Salle 12", "motif": "Séance Rattrapage"}
-        ]
+        # État des réservations (Will be loaded from database)
+        self.reservations_data = []
+        self.load_reservations_from_db()
 
         # Layout principal (Horizontal: Sidebar + Contenu)
         self.main_layout = QHBoxLayout(self)
@@ -447,6 +445,8 @@ class AdminWindow(QWidget):
         # usually Generation is a primary action. But "Supprimer les background colors" applies generally.
         self.btn_generate.setStyleSheet(SOBER_BUTTON_STYLE)
         self.btn_generate.setFixedHeight(50)
+        # Connect button to generation method
+        self.btn_generate.clicked.connect(self.run_generate_timetable)
         
         gen_layout.addWidget(self.btn_generate)
         layout.addWidget(gen_container)
@@ -487,6 +487,204 @@ class AdminWindow(QWidget):
             self.refresh_dashboard()
         else:
             QMessageBox.critical(self, "Erreur", f"Échec de l'import {type_import}. Vérifiez le format.")
+
+    def run_generate_timetable(self):
+        """
+        Génère l'emploi du temps complet pour tous les groupes.
+        Chaque groupe obtient ses cours et TD assignés aux enseignants.
+        Note: Les TP ne sont pas générés automatiquement car ils nécessitent
+        des salles spéciales (laboratoires) et une planification manuelle.
+        """
+        from src.logic.schedule_generator import ScheduleGenerator
+        from datetime import datetime, timedelta
+        from PyQt6.QtWidgets import QProgressDialog
+        
+        # Show progress dialog
+        progress = QProgressDialog(
+            "Génération de l'emploi du temps en cours...", 
+            "Annuler", 0, 100, self
+        )
+        progress.setWindowTitle("Génération")
+        progress.setMinimumWidth(400)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+        
+        try:
+            # Get all data from database
+            groupes = self.db.get_tous_groupes()
+            enseignants = self.db.get_tous_utilisateurs('enseignant')
+            salles = self.db.get_toutes_salles()
+            
+            if not groupes:
+                QMessageBox.warning(self, "Attention", "Aucun groupe trouvé. Importez d'abord les données.")
+                progress.close()
+                return
+            
+            if not enseignants:
+                QMessageBox.warning(self, "Attention", "Aucun enseignant trouvé. Importez d'abord les données.")
+                progress.close()
+                return
+            
+            if not salles:
+                QMessageBox.warning(self, "Attention", "Aucune salle trouvée. Importez d'abord les données.")
+                progress.close()
+                return
+            
+            # Calculate start week (next Monday)
+            # weekday(): Monday=0, Sunday=6
+            # We want to find how many days until next Monday
+            today = datetime.now()
+            days_until_monday = (7 - today.weekday()) % 7
+            if days_until_monday == 0:  # If today is Monday, go to next Monday
+                days_until_monday = 7
+            next_monday = today + timedelta(days=days_until_monday)
+            semaine_debut = next_monday.strftime("%Y-%m-%d")
+            
+            # Get existing sessions to avoid conflicts
+            existing_seances = self.db.get_toutes_seances()
+            existing_seances_dict = [
+                {
+                    'id': s[0], 'titre': s[1], 'type_seance': s[2],
+                    'date': s[3], 'heure_debut': s[4], 'heure_fin': s[5],
+                    'salle_id': s[6], 'enseignant_id': s[7], 'groupe_id': s[8]
+                } for s in existing_seances
+            ] if existing_seances else []
+            
+            existing_reservations = self.db.get_toutes_reservations()
+            existing_reservations_dict = [
+                {
+                    'id': r[0], 'enseignant_id': r[1], 'salle_id': r[2],
+                    'date': r[3], 'heure_debut': r[4], 'heure_fin': r[5],
+                    'statut': r[6]
+                } for r in existing_reservations
+            ] if existing_reservations else []
+            
+            # Initialize generator
+            generator = ScheduleGenerator(self.db, existing_seances_dict, existing_reservations_dict)
+            
+            # Track teacher hours to balance workload
+            teacher_weekly_hours = {}
+            
+            # Define course types and durations for automatic generation
+            # Note: TP sessions are excluded as they require laboratory rooms 
+            # and specialized equipment that needs manual planning
+            NB_SUBJECTS_PER_GROUP = 5  # Number of subjects to generate per group
+            types_cours = [
+                ('Cours', 1.5, 2),   # Type, durée (heures), nb sessions par semaine
+                ('TD', 1.5, 1),      # TD = Travaux Dirigés
+                # TP excluded: requires manual planning with lab rooms
+            ]
+            
+            # List of common subjects for all groups
+            # These represent typical subjects in an engineering curriculum
+            matieres_communes = [
+                "Algorithmique et Programmation",
+                "Bases de Données",
+                "Mathématiques",
+                "Analyse",
+                "Anglais",
+                "Statistiques",
+                "Réseaux",
+                "Systèmes d'Exploitation"
+            ]
+            
+            total_groups = len(groupes)
+            sessions_created = 0
+            errors = []
+            
+            # Global teacher assignment counter for even distribution
+            global_teacher_idx = 0
+            
+            # Process each group
+            for idx, groupe in enumerate(groupes):
+                groupe_id = groupe[0]
+                groupe_nom = groupe[1]
+                
+                # Update progress
+                progress_pct = int((idx / total_groups) * 100)
+                progress.setValue(progress_pct)
+                progress.setLabelText(f"Traitement du groupe: {groupe_nom}...")
+                
+                if progress.wasCanceled():
+                    break
+                
+                # Generate sessions for each subject (limited to NB_SUBJECTS_PER_GROUP)
+                for matiere_nom in matieres_communes[:NB_SUBJECTS_PER_GROUP]:
+                    for type_seance, duree, nb_sessions in types_cours:
+                        # Get teacher using global counter for even distribution
+                        enseignant = enseignants[global_teacher_idx % len(enseignants)]
+                        enseignant_id = enseignant[0]
+                        global_teacher_idx += 1
+                        
+                        # Generate sessions
+                        try:
+                            sessions = generator.generate_schedule_for_group(
+                                groupe_id=groupe_id,
+                                matiere=matiere_nom,
+                                type_seance=type_seance,
+                                duree_heures=duree,
+                                enseignant_id=enseignant_id,
+                                nb_seances_semaine=nb_sessions,
+                                semaine_debut=semaine_debut,
+                                teacher_weekly_hours=teacher_weekly_hours
+                            )
+                            
+                            # Save sessions to database
+                            for session in sessions:
+                                seance_id = self.db.ajouter_seance(
+                                    titre=session['titre'],
+                                    type_seance=session['type_seance'],
+                                    date=session['date'],
+                                    heure_debut=session['heure_debut'],
+                                    heure_fin=session['heure_fin'],
+                                    salle_id=session['salle_id'],
+                                    enseignant_id=session['enseignant_id'],
+                                    groupe_id=session['groupe_id']
+                                )
+                                if seance_id:
+                                    sessions_created += 1
+                                    # Add to conflict detector for incremental updates
+                                    generator.conflict_detector.add_session({
+                                        'id': seance_id,
+                                        'date': session['date'],
+                                        'heure_debut': session['heure_debut'],
+                                        'heure_fin': session['heure_fin'],
+                                        'salle_id': session['salle_id'],
+                                        'enseignant_id': session['enseignant_id'],
+                                        'groupe_id': session['groupe_id']
+                                    })
+                        except Exception as e:
+                            errors.append(f"{groupe_nom}/{matiere_nom}: {str(e)}")
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Show results
+            if sessions_created > 0:
+                msg = f"Génération terminée avec succès !\n\n"
+                msg += f"• {sessions_created} séances créées\n"
+                msg += f"• {total_groups} groupes traités\n"
+                msg += f"• Semaine du {semaine_debut}\n\n"
+                msg += "Chaque étudiant et enseignant peut maintenant consulter son emploi du temps personnel."
+                
+                if errors:
+                    msg += f"\n\n⚠️ {len(errors)} avertissement(s)"
+                
+                QMessageBox.information(self, "Succès", msg)
+            else:
+                error_msg = "Aucune séance n'a pu être créée.\n\n"
+                if errors:
+                    error_msg += "Erreurs:\n" + "\n".join(errors[:5])
+                    if len(errors) > 5:
+                        error_msg += f"\n... et {len(errors) - 5} autres erreurs"
+                QMessageBox.warning(self, "Attention", error_msg)
+            
+            # Refresh dashboard
+            self.refresh_dashboard()
+            
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la génération:\n{str(e)}")
 
     def create_reservations_page(self):
         page = QWidget()
@@ -586,14 +784,203 @@ class AdminWindow(QWidget):
             self.res_table.setRowHeight(i, 60)
 
     def handle_reservation(self, index, accepted):
+        """
+        Handle reservation approval/rejection with admin workflow.
+        - If approved: Confirm session, notify professor AND students
+        - If rejected: Require rejection reason (motif), notify professor only
+        """
         if 0 <= index < len(self.reservations_data):
-            # Mettre à jour le statut au lieu de supprimer
             data = self.reservations_data[index]
-            data['status'] = "Acceptée" if accepted else "Refusée"
-            print(f"Demande {data['status']} pour {data['prof']}")
+            
+            if accepted:
+                # ═══════════════════════════════════════════════════════════
+                # APPROVAL WORKFLOW
+                # ═══════════════════════════════════════════════════════════
+                
+                # Update status in database
+                reservation_id = data.get('db_id')
+                reservation_type = data.get('type', 'reservation')
+                
+                if reservation_type == 'rattrapage' and reservation_id:
+                    # Approve rattrapage (locks the room)
+                    demande = self.db.approuver_demande(reservation_id)
+                    
+                    if demande:
+                        # Send notifications
+                        from src.services_notification import NotificationService
+                        notif_service = NotificationService(self.db)
+                        
+                        # Notify professor
+                        enseignant_id = data.get('enseignant_id')
+                        if enseignant_id:
+                            notif_service.envoyer_notification(
+                                destinataire_id=enseignant_id,
+                                type_notification='info',
+                                titre='Demande Approuvée',
+                                message=f"Votre demande de rattrapage du {data['date']} a été approuvée. "
+                                        f"Salle {data['salle']} confirmée."
+                            )
+                        
+                        # Notify students of the group
+                        groupe_id = data.get('groupe_id')
+                        if groupe_id:
+                            notif_service.notifier_groupe(
+                                groupe_id=groupe_id,
+                                type_notification='info',
+                                titre='Séance de Rattrapage Confirmée',
+                                message=f"Rattrapage {data['motif']} le {data['date']} - "
+                                        f"Salle {data['salle']}"
+                            )
+                        
+                        data['status'] = "Acceptée"
+                        QMessageBox.information(
+                            self, "Succès", 
+                            f"Demande approuvée. Notifications envoyées au professeur et aux étudiants."
+                        )
+                
+                elif reservation_id:
+                    # Approve regular reservation
+                    self.db.modifier_statut_reservation(reservation_id, 'validee')
+                    data['status'] = "Acceptée"
+                    
+                    # Notify professor
+                    from src.services_notification import NotificationService
+                    notif_service = NotificationService(self.db)
+                    
+                    enseignant_id = data.get('enseignant_id')
+                    if enseignant_id:
+                        notif_service.envoyer_notification(
+                            destinataire_id=enseignant_id,
+                            type_notification='info',
+                            titre='Réservation Approuvée',
+                            message=f"Votre réservation du {data['date']} - Salle {data['salle']} a été approuvée."
+                        )
+                    
+                    QMessageBox.information(self, "Succès", "Réservation approuvée.")
+                else:
+                    data['status'] = "Acceptée"
+                    
+            else:
+                # ═══════════════════════════════════════════════════════════
+                # REJECTION WORKFLOW - REQUIRES MOTIF
+                # ═══════════════════════════════════════════════════════════
+                
+                from PyQt6.QtWidgets import QInputDialog
+                
+                motif_rejet, ok = QInputDialog.getText(
+                    self, 
+                    "Motif de Refus", 
+                    "Veuillez indiquer le motif du refus (obligatoire):",
+                    text=""
+                )
+                
+                if not ok or not motif_rejet.strip():
+                    QMessageBox.warning(
+                        self, "Motif Requis", 
+                        "Un motif de refus est obligatoire pour rejeter une demande."
+                    )
+                    return
+                
+                # Update status in database with rejection reason
+                reservation_id = data.get('db_id')
+                reservation_type = data.get('type', 'reservation')
+                
+                if reservation_type == 'rattrapage' and reservation_id:
+                    demande = self.db.rejeter_demande(reservation_id, motif_rejet)
+                    
+                    if demande:
+                        # Notify professor with rejection reason
+                        from src.services_notification import NotificationService
+                        notif_service = NotificationService(self.db)
+                        
+                        enseignant_id = data.get('enseignant_id')
+                        if enseignant_id:
+                            notif_service.envoyer_notification(
+                                destinataire_id=enseignant_id,
+                                type_notification='alerte',
+                                titre='Demande Rejetée',
+                                message=f"Votre demande de rattrapage du {data['date']} a été rejetée.\n"
+                                        f"Motif: {motif_rejet}"
+                            )
+                        
+                        data['status'] = "Refusée"
+                        data['motif_rejet'] = motif_rejet
+                        
+                elif reservation_id:
+                    self.db.modifier_reservation_avec_motif(reservation_id, 'rejetee', motif_rejet)
+                    
+                    # Notify professor
+                    from src.services_notification import NotificationService
+                    notif_service = NotificationService(self.db)
+                    
+                    enseignant_id = data.get('enseignant_id')
+                    if enseignant_id:
+                        notif_service.envoyer_notification(
+                            destinataire_id=enseignant_id,
+                            type_notification='alerte',
+                            titre='Réservation Rejetée',
+                            message=f"Votre réservation du {data['date']} a été rejetée.\n"
+                                    f"Motif: {motif_rejet}"
+                        )
+                    
+                    data['status'] = "Refusée"
+                else:
+                    data['status'] = "Refusée"
+                    data['motif_rejet'] = motif_rejet
+                
+                QMessageBox.information(
+                    self, "Demande Rejetée", 
+                    f"Demande rejetée. Le professeur a été notifié avec le motif:\n{motif_rejet}"
+                )
             
             # Rafraîchir UI
             self.refresh_reservations()
+    
+    def load_reservations_from_db(self):
+        """Load reservations from database (rattrapages + reservations en attente)"""
+        self.reservations_data = []
+        
+        try:
+            # Load rattrapages en attente
+            demandes = self.db.get_demandes_en_attente()
+            for d in demandes:
+                # d: id, enseignant_id, groupe_id, salle_id, date, h_debut, h_fin, motif, statut, motif_rejet, seance_orig_id, date_creation, nom, prenom, salle_nom, groupe_nom
+                self.reservations_data.append({
+                    'db_id': d[0],
+                    'type': 'rattrapage',
+                    'enseignant_id': d[1],
+                    'groupe_id': d[2],
+                    'date': d[4],
+                    'prof': f"{d[13]} {d[12]}",  # prenom nom
+                    'salle': d[14],  # salle_nom
+                    'motif': f"Rattrapage: {d[7]}" if d[7] else "Rattrapage",
+                    'groupe': d[15]  # groupe_nom
+                })
+            
+            # Load reservations en attente
+            reservations = self.db.get_reservations_by_statut('en_attente')
+            for r in reservations:
+                # r: id, enseignant_id, salle_id, date, h_debut, h_fin, statut, motif, date_demande
+                ens = self.db.get_utilisateur_by_id(r[1])
+                salle = self.db.get_salle_by_id(r[2])
+                
+                self.reservations_data.append({
+                    'db_id': r[0],
+                    'type': 'reservation',
+                    'enseignant_id': r[1],
+                    'date': r[3],
+                    'prof': f"{ens[2]} {ens[1]}" if ens else "Inconnu",
+                    'salle': salle[1] if salle else "Inconnue",
+                    'motif': r[7] if len(r) > 7 and r[7] else "Réservation"
+                })
+                
+        except Exception as e:
+            print(f"Erreur chargement réservations: {e}")
+            # Fallback to demo data
+            self.reservations_data = [
+                {"date": "2024-02-10", "prof": "M. Alami", "salle": "Amphi B", "motif": "Examen Partiel"},
+                {"date": "2024-02-12", "prof": "Mme. Bennani", "salle": "Salle 12", "motif": "Séance Rattrapage"}
+            ]
 
     def simulate_new_request(self):
         """Ajoute une demande fictive pour tester"""

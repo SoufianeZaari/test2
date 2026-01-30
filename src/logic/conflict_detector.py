@@ -23,6 +23,14 @@ class ConflictDetector:
         """
         self.existing_seances = existing_seances or []
     
+    def add_session(self, session: Dict):
+        """
+        Add a new session to the list of existing sessions for future conflict detection
+        Args:
+            session: Dictionary containing session data
+        """
+        self.existing_seances.append(session)
+    
     def detect_all_conflicts(self, date: str, heure_debut: str, heure_fin: str,
                             salle_id: Optional[int] = None,
                             enseignant_id: Optional[int] = None,

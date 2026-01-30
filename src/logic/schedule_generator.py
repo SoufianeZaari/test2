@@ -38,7 +38,10 @@ class ScheduleGenerator:
             existing_reservations: List of existing reservations
         """
         self.db = db
-        self.constraint_validator = ConstraintValidator(db)
+        self.constraint_validator = ConstraintValidator(
+            existing_seances or [],
+            existing_reservations or []
+        )
         
         # Combine seances and approved reservations
         all_sessions = (existing_seances or [])
@@ -65,7 +68,8 @@ class ScheduleGenerator:
                                    type_seance: str, duree_heures: float,
                                    enseignant_id: int, nb_seances_semaine: int,
                                    semaine_debut: str = None,
-                                   teacher_weekly_hours: Dict[int, float] = None) -> List[Dict]:
+                                   teacher_weekly_hours: Dict[int, float] = None,
+                                   module_departement: str = None) -> List[Dict]:
         """
         Generates schedule for a group's course
         Args:
@@ -77,6 +81,7 @@ class ScheduleGenerator:
             nb_seances_semaine: Number of sessions per week
             semaine_debut: Start week date "YYYY-MM-DD" (default: current week)
             teacher_weekly_hours: Dict tracking teacher hours per week {teacher_id: hours}
+            module_departement: Department of the module (for specialty validation)
         Returns:
             List of generated session dictionaries (not yet saved to DB)
         """
@@ -92,6 +97,19 @@ class ScheduleGenerator:
         # Initialize teacher hours tracking if not provided
         if teacher_weekly_hours is None:
             teacher_weekly_hours = {}
+        
+        # ═══════════════════════════════════════════════════════════
+        # CONSTRAINT 1: Validate teacher specialty matches module department
+        # ═══════════════════════════════════════════════════════════
+        if module_departement:
+            is_valid, teacher_specialite = self.db.valider_enseignant_module(
+                enseignant_id, module_departement
+            )
+            if not is_valid:
+                print(f"⚠️ Contrainte spécialité: Enseignant {enseignant_id} "
+                      f"(spécialité: {teacher_specialite}) ne peut pas enseigner "
+                      f"module du département {module_departement}")
+                return []  # Cannot assign this teacher to this module
         
         # Check teacher workload constraint (8h/week for auto-generated)
         current_teacher_hours = teacher_weekly_hours.get(enseignant_id, 0.0)
@@ -109,7 +127,8 @@ class ScheduleGenerator:
         if not groupe:
             conn.close()
             return []
-        effectif = groupe['effectif']
+        # Handle both tuple and dict access
+        effectif = groupe[0] if isinstance(groupe, tuple) else groupe.get('effectif', 0)
         conn.close()
         
         # Get available rooms with sufficient capacity
@@ -153,8 +172,27 @@ class ScheduleGenerator:
                 "SELECT * FROM salles WHERE capacite >= ? ORDER BY capacite",
                 (min_capacity,)
             )
-            rooms = [dict(row) for row in cursor.fetchall()]
+            rows = cursor.fetchall()
             conn.close()
+            
+            # Convert tuples to dicts
+            rooms = []
+            for row in rows:
+                if isinstance(row, tuple):
+                    rooms.append({
+                        'id': row[0],
+                        'nom': row[1],
+                        'capacite': row[2],
+                        'type_salle': row[3],
+                        'equipements': row[4] or ""
+                    })
+                elif isinstance(row, dict):
+                    rooms.append(row)
+                else:
+                    try:
+                        rooms.append(dict(row))
+                    except (TypeError, ValueError):
+                        continue
             return rooms
         except Exception as e:
             print(f"Erreur lors de la récupération des salles: {e}")
@@ -308,4 +346,48 @@ class ScheduleGenerator:
                 total_hours += duree_minutes / 60.0
         
         return total_hours
+    
+    def find_suitable_teacher_for_module(self, departement: str, 
+                                         teacher_weekly_hours: Dict[int, float] = None,
+                                         excluded_teacher_ids: List[int] = None) -> Optional[int]:
+        """
+        Finds a teacher with the matching specialty/department who has available hours.
+        
+        Args:
+            departement: The department/specialty required
+            teacher_weekly_hours: Current hours tracking
+            excluded_teacher_ids: Teachers to exclude
+        
+        Returns:
+            Teacher ID if found, None otherwise
+        """
+        if teacher_weekly_hours is None:
+            teacher_weekly_hours = {}
+        if excluded_teacher_ids is None:
+            excluded_teacher_ids = []
+        
+        # Get teachers with matching specialty
+        teachers = self.db.get_enseignants_by_specialite(departement)
+        
+        # Also try partial matches
+        if not teachers:
+            all_teachers = self.db.get_tous_utilisateurs('enseignant')
+            teachers = []
+            departement_lower = departement.lower()
+            for t in all_teachers:
+                specialite = t[6] if len(t) > 6 and t[6] else ""
+                if departement_lower in specialite.lower() or specialite.lower() in departement_lower:
+                    teachers.append(t)
+        
+        # Find one with available hours
+        for teacher in teachers:
+            teacher_id = teacher[0]
+            if teacher_id in excluded_teacher_ids:
+                continue
+            
+            current_hours = teacher_weekly_hours.get(teacher_id, 0.0)
+            if current_hours < self.MAX_TEACHER_HOURS_PER_WEEK:
+                return teacher_id
+        
+        return None
 
