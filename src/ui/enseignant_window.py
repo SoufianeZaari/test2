@@ -4,6 +4,10 @@ Fenêtre principale de l'enseignant
 Fonctionnalités : Emploi du temps, Réservations, Recherche Salles, Indisponibilités
 """
 
+import os
+import csv
+from datetime import datetime
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QFrame, QStackedWidget, QTableWidget, 
@@ -14,6 +18,7 @@ from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QColor
 
 from configUI import WINDOW_CONFIG, COLORS, FST_LOGO_IMAGE
+from config import MATIERES_COMPLETES, SPECIALITE_KEYWORDS
 from src.ui.styles import (
     GLOBAL_STYLE, SIDEBAR_STYLE, SIDEBAR_BUTTON_STYLE, 
     SIDEBAR_USER_INFO_STYLE, CARD_STYLE, CARD_TITLE_STYLE,
@@ -276,9 +281,6 @@ class EnseignantWindow(QWidget):
     def export_schedule(self, format_type):
         """Exporte l'emploi du temps dans le format demandé"""
         try:
-            from datetime import datetime
-            import os
-            
             # Créer le dossier exports s'il n'existe pas
             exports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'exports')
             os.makedirs(exports_dir, exist_ok=True)
@@ -309,7 +311,6 @@ class EnseignantWindow(QWidget):
 
     def _export_to_pdf(self, exports_dir, filename):
         """Export vers PDF en utilisant reportlab si disponible, sinon texte"""
-        import os
         filepath = os.path.join(exports_dir, f"{filename}.pdf")
         
         try:
@@ -370,8 +371,6 @@ class EnseignantWindow(QWidget):
 
     def _export_to_excel(self, exports_dir, filename):
         """Export vers Excel en utilisant openpyxl si disponible, sinon CSV"""
-        import os
-        
         try:
             from openpyxl import Workbook
             from openpyxl.styles import Font, Fill, PatternFill, Alignment
@@ -387,24 +386,30 @@ class EnseignantWindow(QWidget):
             ws['A2'] = f"Spécialité: {getattr(self.user, 'specialite', 'N/A')}"
             
             # Headers
-            days = ["Horaire", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
-            for i, day in enumerate(days):
-                cell = ws.cell(row=4, column=i+1, value=day)
-                cell.font = Font(bold=True)
+            headers = ["Date", "Horaire", "Matière", "Type", "Salle", "Groupe"]
+            for i, header in enumerate(headers):
+                cell = ws.cell(row=4, column=i+1, value=header)
+                cell.font = Font(bold=True, color="FFFFFF")
                 cell.fill = PatternFill("solid", fgColor="1e3a8a")
                 cell.alignment = Alignment(horizontal='center')
             
-            # Time slots
-            time_slots = ["08:30-10:00", "10:15-11:45", "12:00-13:30", "13:45-15:15", "15:30-17:00"]
-            for i, slot in enumerate(time_slots):
-                ws.cell(row=5+i, column=1, value=slot)
+            # Data rows
+            seances = self.db.get_seances_by_enseignant(self.user.id)
+            for row_num, s in enumerate(seances, start=5):
+                salle = self.db.get_salle_by_id(s[6]) if s[6] else None
+                groupe = self.db.get_groupe_by_id(s[8]) if s[8] else None
+                ws.cell(row=row_num, column=1, value=s[3])
+                ws.cell(row=row_num, column=2, value=f"{s[4]}-{s[5]}")
+                ws.cell(row=row_num, column=3, value=s[1])
+                ws.cell(row=row_num, column=4, value=s[2])
+                ws.cell(row=row_num, column=5, value=salle[1] if salle else 'N/A')
+                ws.cell(row=row_num, column=6, value=groupe[1] if groupe else 'N/A')
             
             wb.save(filepath)
             return True, filepath
             
         except ImportError:
             # Fallback to CSV
-            import csv
             filepath = os.path.join(exports_dir, f"{filename}.csv")
             
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
@@ -428,9 +433,6 @@ class EnseignantWindow(QWidget):
 
     def _export_to_image(self, exports_dir, filename):
         """Export vers Image en capturant le widget de la table"""
-        import os
-        from PyQt6.QtGui import QPixmap
-        
         filepath = os.path.join(exports_dir, f"{filename}.png")
         
         try:
@@ -549,8 +551,6 @@ class EnseignantWindow(QWidget):
 
     def load_matieres_for_specialite(self):
         """Charge les matières correspondant à la spécialité de l'enseignant"""
-        from config import MATIERES_COMPLETES, SPECIALITE_KEYWORDS
-        
         self.new_res_subject.clear()
         specialite = getattr(self.user, 'specialite', None)
         
@@ -600,10 +600,15 @@ class EnseignantWindow(QWidget):
             date = self.new_res_date.date().toString("yyyy-MM-dd")
             heure_debut = self.new_res_time_start.time().toString("HH:mm")
             heure_fin = self.new_res_time_end.time().toString("HH:mm")
-            matiere = self.new_res_subject.currentText()
+            matiere = self.new_res_subject.currentText().strip()
             type_seance = self.new_res_type.currentText()
             salle_id = self.new_res_salle.currentData()
             motif = self.new_res_motif.toPlainText()
+            
+            # Validation de la matière
+            if not matiere:
+                QMessageBox.warning(self, "Erreur", "Veuillez saisir une matière.")
+                return
             
             # Validation de l'heure
             if self.new_res_time_start.time() >= self.new_res_time_end.time():

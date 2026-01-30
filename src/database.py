@@ -4,7 +4,7 @@ import hashlib
 import os
 import shutil
 from datetime import datetime
-from config import DATABASE_PATH
+from config import DATABASE_PATH, SPECIALITE_KEYWORDS
 
 class Database:
     """Classe pour gérer la base de données SQLite - FSTT"""
@@ -827,8 +827,6 @@ class Database:
         Vérifie si un enseignant peut enseigner une matière
         basé sur sa spécialité et les mots-clés de la matière
         """
-        from config import SPECIALITE_KEYWORDS
-        
         # Récupérer la spécialité de l'enseignant
         enseignant = self.get_utilisateur_by_id(enseignant_id)
         if not enseignant:
